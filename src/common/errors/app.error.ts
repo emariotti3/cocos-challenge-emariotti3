@@ -28,6 +28,12 @@ export class ConflictError extends AppError {
   }
 }
 
+export class ServiceUnavailableError extends AppError {
+  constructor(code: string, message: string, details?: Record<string, unknown>) {
+    super(HttpStatus.SERVICE_UNAVAILABLE, code, message, details);
+  }
+}
+
 export class UnprocessableError extends AppError {
   constructor(code: string, message: string, details?: Record<string, unknown>) {
     super(HttpStatus.UNPROCESSABLE_ENTITY, code, message, details);

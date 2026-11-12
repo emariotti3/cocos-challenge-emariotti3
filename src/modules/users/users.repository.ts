@@ -1,8 +1,23 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/sequelize';
 import { QueryTypes, type Sequelize, Transaction } from 'sequelize';
-import { NotFoundError } from '../../common/errors/app.error';
+import { NotFoundError, ServiceUnavailableError } from '../../common/errors/app.error';
 import { UserModel } from '../../database/models';
+
+/**
+ * Bounds for one locked ledger transaction. A waiter that cannot get the user
+ * row within LOCK_TIMEOUT, or a statement that runs longer than
+ * STATEMENT_TIMEOUT, is aborted and reported as 503 LEDGER_BUSY instead of
+ * holding a pool connection indefinitely (DB_POOL_MAX connections shared by
+ * every request). Both are SET LOCAL, so they end with the transaction.
+ */
+const LOCK_TIMEOUT = '5s';
+const STATEMENT_TIMEOUT = '10s';
+/** Postgres SQLSTATEs: lock_not_available, query_canceled (statement_timeout). */
+const TIMEOUT_SQLSTATES = new Set(['55P03', '57014']);
+
+const sqlState = (error: unknown): string | undefined =>
+  (error as { original?: { code?: unknown } } | null)?.original?.code as string | undefined;
 
 export interface UserRecord {
   id: number;
@@ -49,12 +64,34 @@ export class UsersRepository {
    * granted sees the rows committed by the previous lock holder, which is what
    * makes "lock, then read balances, then insert" correct. (Under REPEATABLE
    * READ the balance reads would use a snapshot taken before the lock and the
-   * guarantee would silently disappear.) Any error rolls the transaction back.
+   * guarantee would silently disappear.) Any error rolls the transaction back;
+   * lock/statement timeouts become 503 LEDGER_BUSY so the client can retry.
    */
   async withLock<T>(userId: number, work: (transaction: Transaction) => Promise<T>): Promise<T> {
+    try {
+      return await this.runLocked(userId, work);
+    } catch (error) {
+      const state = sqlState(error);
+      if (state !== undefined && TIMEOUT_SQLSTATES.has(state)) {
+        this.logger.warn({ userId, sqlState: state }, 'Ledger transaction timed out');
+        throw new ServiceUnavailableError(
+          'LEDGER_BUSY',
+          'The account is busy processing another operation; retry shortly',
+          { userId },
+        );
+      }
+      throw error;
+    }
+  }
+
+  private runLocked<T>(userId: number, work: (transaction: Transaction) => Promise<T>): Promise<T> {
     return this.sequelize.transaction(
       { isolationLevel: Transaction.ISOLATION_LEVELS.READ_COMMITTED },
       async (transaction) => {
+        await this.sequelize.query(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'`, { transaction });
+        await this.sequelize.query(`SET LOCAL statement_timeout = '${STATEMENT_TIMEOUT}'`, {
+          transaction,
+        });
         const startedAt = process.hrtime.bigint();
         const locked = await this.lockForUpdate(userId, transaction);
         if (!locked) {

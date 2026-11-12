@@ -117,6 +117,7 @@ POST /api/v1/users/1/orders
 | Cash instrument, no market price for a MARKET order, budget below one share               | 422  | `NOT_TRADABLE`, `NO_MARKET_PRICE`, `AMOUNT_TOO_SMALL`       |
 | Cancelling a non-NEW order                                                                | 409  | `ORDER_NOT_CANCELLABLE`                                     |
 | Too many requests                                                                         | 429  | `RATE_LIMITED` (+ `Retry-After`)                            |
+| Account lock not acquired within 5 s / statement over 10 s                                | 503  | `LEDGER_BUSY` (safe to retry)                               |
 
 ### Error format (RFC 7807)
 

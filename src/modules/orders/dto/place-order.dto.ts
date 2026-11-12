@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
   IsEnum,
   IsIn,
@@ -14,6 +15,8 @@ import {
   IsPositiveDecimal,
   isPositiveDecimal,
 } from '../../../common/validation/decimal.validators';
+import { PG_INT_MAX } from '../../../common/validation/limits';
+import { trim } from '../../../common/validation/transforms';
 
 export const MAX_ORDER_SIZE = 1_000_000_000;
 /** NUMERIC(10,2) upper bound for prices. */
@@ -75,6 +78,7 @@ function PriceMatchesOrderType() {
 
 export class PlaceOrderDto {
   @ApiProperty({ example: 47, description: 'Instrument id (see GET /instruments)' })
+  @Max(PG_INT_MAX)
   @IsPositive()
   @IsInt()
   instrumentId!: number;
@@ -117,6 +121,7 @@ export class PlaceOrderDto {
     description:
       'ARS budget. Converted to the maximum whole number of shares at the execution price (close for MARKET, `price` for LIMIT). No fractional shares.',
   })
+  @Transform(trim)
   @ValidateIf((dto: PlaceOrderDto) => dto.amount !== undefined)
   @IsPositiveDecimal({ maxDecimals: 2, lessThan: MAX_AMOUNT_EXCLUSIVE })
   @NotWithSize()
@@ -127,6 +132,7 @@ export class PlaceOrderDto {
     example: '900.00',
     description: 'Limit price in ARS. Required for LIMIT, forbidden for MARKET.',
   })
+  @Transform(trim)
   @ValidateIf((dto: PlaceOrderDto) => dto.price !== undefined || dto.type === OrderType.LIMIT)
   @PriceMatchesOrderType()
   price?: string | number;

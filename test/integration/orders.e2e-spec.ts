@@ -97,6 +97,36 @@ describe('Orders API', () => {
       });
     });
 
+    it('tolerates surrounding whitespace in amount and price strings', async () => {
+      const market = await place({
+        instrumentId: PAMP,
+        side: 'BUY',
+        type: 'MARKET',
+        amount: ' 100000 ',
+      }).expect(201);
+      expect(market.body).toMatchObject({ status: 'FILLED', size: 108 });
+      const limit = await place({
+        instrumentId: PAMP,
+        side: 'BUY',
+        type: 'LIMIT',
+        size: 1,
+        price: ' 900 ',
+      }).expect(201);
+      expect(limit.body).toMatchObject({ status: 'NEW', price: '900.00' });
+    });
+
+    it('sizes an amount-based SELL with the last close', async () => {
+      // 20,000 / 925.85 = 21.6 -> 21 shares out of the 40 held
+      const res = await place({
+        instrumentId: PAMP,
+        side: 'SELL',
+        type: 'MARKET',
+        amount: '20000',
+      }).expect(201);
+      expect(res.body).toMatchObject({ status: 'FILLED', size: 21 });
+      expect(await pamp()).toMatchObject({ quantity: 19 });
+    });
+
     it('accepts the amount as a JSON number too', async () => {
       const res = await place({
         instrumentId: PAMP,
@@ -235,6 +265,18 @@ describe('Orders API', () => {
       });
     });
 
+    it('accepts a BUY whose notional equals the available cash exactly', async () => {
+      const res = await place({
+        instrumentId: PAMP,
+        side: 'BUY',
+        type: 'LIMIT',
+        size: 1,
+        price: '627500',
+      }).expect(201);
+      expect(res.body.status).toBe('NEW');
+      expect((await portfolio()).cash.available).toBe('0.00');
+    });
+
     it('counts pending BUY reservations against cash', async () => {
       await place({
         instrumentId: PAMP,
@@ -269,6 +311,7 @@ describe('Orders API', () => {
       ['unknown side', { ...base, side: 'HOLD' }, 'side'],
       ['unknown type', { ...base, type: 'STOP' }, 'type'],
       ['missing instrumentId', { side: 'BUY', type: 'MARKET', size: 1 }, 'instrumentId'],
+      ['instrumentId above int4', { ...base, instrumentId: 2_147_483_648 }, 'instrumentId'],
       ['unknown field', { ...base, foo: 1 }, 'foo'],
     ])('%s', async (_name, body, path) => {
       const res = await place(body)
@@ -402,8 +445,17 @@ describe('Orders API', () => {
       expect(ids(sells.body)).toEqual([6, 4]);
     });
 
+    it('rejects ids above int4 on the list filter, the order route and the user route with 400', async () => {
+      await api().get('/api/v1/users/1/orders?instrumentId=2147483648').expect(400);
+      await api().get('/api/v1/users/1/orders/2147483648').expect(400);
+      await api().get('/api/v1/users/2147483648/orders').expect(400);
+      await api().get('/api/v1/users/1/orders/2147483647').expect(404); // in range: just not there
+    });
+
     it('rejects a malformed cursor and returns an empty list for a user without orders', async () => {
       await api().get('/api/v1/users/1/orders?cursor=garbage').expect(400);
+      const lenientDate = Buffer.from('{"d":"2024","i":1}').toString('base64url');
+      await api().get(`/api/v1/users/1/orders?cursor=${lenientDate}`).expect(400);
       const res = await api().get('/api/v1/users/2/orders').expect(200);
       expect(res.body).toEqual({ data: [], meta: { nextCursor: null } });
     });

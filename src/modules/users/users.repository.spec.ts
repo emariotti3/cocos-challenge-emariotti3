@@ -31,6 +31,27 @@ describe('UsersRepository.withLock', () => {
       expect.objectContaining({ bind: { userId: 1 }, transaction }),
     );
     expect(work).toHaveBeenCalledWith(transaction);
+    expect(query).toHaveBeenCalledWith(expect.stringMatching(/SET LOCAL lock_timeout/), {
+      transaction,
+    });
+    expect(query).toHaveBeenCalledWith(expect.stringMatching(/SET LOCAL statement_timeout/), {
+      transaction,
+    });
+  });
+
+  it.each(['55P03', '57014'])('maps a %s timeout to 503 LEDGER_BUSY', async (code) => {
+    query.mockResolvedValue([{ id: 1 }]);
+    const dbError = Object.assign(new Error('timeout'), { original: { code } });
+    await expect(repository.withLock(1, () => Promise.reject(dbError))).rejects.toMatchObject({
+      code: 'LEDGER_BUSY',
+      status: 503,
+    });
+  });
+
+  it('rethrows other database errors untouched', async () => {
+    query.mockResolvedValue([{ id: 1 }]);
+    const boom = new Error('boom');
+    await expect(repository.withLock(1, () => Promise.reject(boom))).rejects.toBe(boom);
   });
 
   it('fails with USER_NOT_FOUND (and never runs the work) if the user row is gone', async () => {

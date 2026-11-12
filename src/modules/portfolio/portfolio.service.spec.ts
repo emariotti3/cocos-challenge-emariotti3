@@ -1,3 +1,4 @@
+import type { Sequelize, Transaction } from 'sequelize';
 import { InstrumentType } from '../../common/domain/enums';
 import { Money } from '../../common/money/money';
 import type { InstrumentsRepository } from '../instruments/instruments.repository';
@@ -13,7 +14,13 @@ describe('PortfolioService', () => {
   } as unknown as jest.Mocked<PortfolioRepository>;
   const instruments = { findByIds: jest.fn() } as unknown as jest.Mocked<InstrumentsRepository>;
   const marketdata = { getLatestPrices: jest.fn() } as unknown as jest.Mocked<MarketdataService>;
-  const service = new PortfolioService(ledger, instruments, marketdata);
+  const transaction = { id: 'snapshot' } as unknown as Transaction;
+  const sequelize = {
+    transaction: jest.fn((_options: unknown, callback: (t: Transaction) => Promise<unknown>) =>
+      callback(transaction),
+    ),
+  } as unknown as jest.Mocked<Sequelize>;
+  const service = new PortfolioService(sequelize, ledger, instruments, marketdata);
   const user = { id: 1, email: 'emiliano@test.com', accountNumber: '10001' };
 
   const seedLedger = () => {

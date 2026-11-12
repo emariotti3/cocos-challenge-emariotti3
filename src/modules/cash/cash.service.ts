@@ -7,9 +7,9 @@ import {
   type InstrumentRecord,
   InstrumentsRepository,
 } from '../instruments/instruments.repository';
+import { toOrderResponse } from '../orders/dto/order.mapper';
 import type { OrderResponseDto } from '../orders/dto/order.response.dto';
 import { type OrderRecord, OrdersRepository } from '../orders/orders.repository';
-import { toOrderResponse } from '../orders/orders.service';
 import { PortfolioRepository } from '../portfolio/portfolio.repository';
 import { type UserRecord, UsersRepository } from '../users/users.repository';
 import { type CashSide, decideCashMovement } from './domain/cash-decision';

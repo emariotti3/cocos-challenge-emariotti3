@@ -117,6 +117,7 @@ POST /api/v1/users/1/orders
 | Instrumento de efectivo, sin precio de mercado para una MARKET, presupuesto menor a una acción | 422  | `NOT_TRADABLE`, `NO_MARKET_PRICE`, `AMOUNT_TOO_SMALL`       |
 | Cancelar una orden que no está en NEW                                                          | 409  | `ORDER_NOT_CANCELLABLE`                                     |
 | Demasiados requests                                                                            | 429  | `RATE_LIMITED` (+ `Retry-After`)                            |
+| Candado de la cuenta no obtenido en 5 s / sentencia de más de 10 s                             | 503  | `LEDGER_BUSY` (seguro de reintentar)                        |
 
 ### Formato de error (RFC 7807)
 

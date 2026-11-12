@@ -1,6 +1,8 @@
-import Decimal from 'decimal.js';
+import DecimalJs from 'decimal.js';
 
-Decimal.set({ precision: 40, rounding: Decimal.ROUND_HALF_UP });
+/** A private clone: this precision/rounding applies to Money only, not to every decimal.js user in the process. */
+const Decimal = DecimalJs.clone({ precision: 40, rounding: DecimalJs.ROUND_HALF_UP });
+type Decimal = DecimalJs;
 
 export type MoneyInput = Money | Decimal | string | number;
 

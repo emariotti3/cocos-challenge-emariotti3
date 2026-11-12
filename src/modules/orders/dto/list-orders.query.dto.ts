@@ -2,6 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsEnum, IsInt, IsOptional, IsPositive, IsString, Length, Max, Min } from 'class-validator';
 import { OrderSide, OrderStatus } from '../../../common/domain/enums';
+import { PG_INT_MAX } from '../../../common/validation/limits';
 
 export class ListOrdersQueryDto {
   @ApiPropertyOptional({ enum: OrderStatus })
@@ -17,6 +18,7 @@ export class ListOrdersQueryDto {
   @ApiPropertyOptional({ example: 47 })
   @IsOptional()
   @Type(() => Number)
+  @Max(PG_INT_MAX)
   @IsPositive()
   @IsInt()
   instrumentId?: number;

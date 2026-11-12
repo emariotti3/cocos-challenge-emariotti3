@@ -14,6 +14,7 @@ import { MetricsService } from '../../observability/metrics/metrics.service';
 import { type UserRecord, UsersRepository } from '../users/users.repository';
 import { decideOrder } from './domain/order-decision';
 import type { ListOrdersQueryDto } from './dto/list-orders.query.dto';
+import { toOrderResponse } from './dto/order.mapper';
 import type { OrderListResponseDto, OrderResponseDto } from './dto/order.response.dto';
 import { MAX_ORDER_SIZE, type PlaceOrderDto } from './dto/place-order.dto';
 import { type OrderRecord, OrdersRepository } from './orders.repository';
@@ -279,21 +280,4 @@ export class OrdersService {
     }
     return size;
   }
-}
-
-export function toOrderResponse(order: OrderRecord): OrderResponseDto {
-  return {
-    id: order.id,
-    userId: order.userId,
-    instrumentId: order.instrumentId,
-    ticker: order.ticker,
-    side: order.side,
-    type: order.type,
-    status: order.status,
-    size: order.size,
-    price: Money.of(order.price).toFixed(),
-    notional: Money.of(order.price).times(order.size).toFixed(),
-    rejectionReason: order.rejectionReason,
-    datetime: order.datetime.toISOString(),
-  };
 }

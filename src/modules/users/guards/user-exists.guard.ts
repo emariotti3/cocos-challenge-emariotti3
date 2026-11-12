@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { NotFoundError } from '../../../common/errors/app.error';
+import { isPgInt } from '../../../common/validation/limits';
 import { type UserRecord, UsersRepository } from '../users.repository';
 
 export type RequestWithUser = Request & { user?: UserRecord };
@@ -25,7 +26,7 @@ export class UserExistsGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<RequestWithUser>();
     const raw = request.params['userId'];
-    if (typeof raw !== 'string' || !POSITIVE_INT.test(raw)) {
+    if (typeof raw !== 'string' || !POSITIVE_INT.test(raw) || !isPgInt(Number(raw))) {
       throw new BadRequestException({
         code: 'VALIDATION_ERROR',
         message: 'Request validation failed',

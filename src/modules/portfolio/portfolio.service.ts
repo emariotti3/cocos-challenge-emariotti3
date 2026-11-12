@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { InjectConnection } from '@nestjs/sequelize';
+import { type Sequelize, Transaction } from 'sequelize';
 import { Money, percentChange } from '../../common/money/money';
 import {
   type InstrumentRecord,
@@ -19,17 +21,25 @@ export class PortfolioService {
   private readonly logger = new Logger(PortfolioService.name);
 
   constructor(
+    @InjectConnection() private readonly sequelize: Sequelize,
     private readonly ledger: PortfolioRepository,
     private readonly instruments: InstrumentsRepository,
     private readonly marketdata: MarketdataService,
   ) {}
 
   async getPortfolio(user: UserRecord): Promise<PortfolioResponseDto> {
-    const [cash, trades, reservedSells] = await Promise.all([
-      this.ledger.getCashSummary(user.id),
-      this.ledger.getFilledTrades(user.id),
-      this.ledger.getReservedSellSizes(user.id),
-    ]);
+    // One REPEATABLE READ snapshot for the three ledger reads: an order that
+    // commits while the portfolio is being assembled is either fully visible
+    // (cash and position) or not at all, never half of each.
+    const [cash, trades, reservedSells] = await this.sequelize.transaction(
+      { isolationLevel: Transaction.ISOLATION_LEVELS.REPEATABLE_READ, readOnly: true },
+      (transaction) =>
+        Promise.all([
+          this.ledger.getCashSummary(user.id, transaction),
+          this.ledger.getFilledTrades(user.id, transaction),
+          this.ledger.getReservedSellSizes(user.id, transaction),
+        ]),
+    );
 
     const { positions, warnings } = computePositions(trades);
     const instrumentIds = positions.map((position) => position.instrumentId);
@@ -38,15 +48,16 @@ export class PortfolioService {
       this.instruments.findByIds(instrumentIds),
     ]);
 
-    const positionDtos = positions.map((position) =>
-      valuePosition(
+    const positionDtos = positions.map((position) => {
+      const valued = valuePosition(
         position,
         instruments.get(position.instrumentId),
         prices.get(position.instrumentId) ?? null,
         reservedSells.get(position.instrumentId) ?? 0,
-        warnings,
-      ),
-    );
+      );
+      if (valued.warning) warnings.push(valued.warning);
+      return valued.dto;
+    });
     positionDtos.sort((a, b) => a.ticker.localeCompare(b.ticker));
 
     const positionsValue = Money.sum(positionDtos.map((position) => position.marketValue));
@@ -73,23 +84,28 @@ export class PortfolioService {
   }
 }
 
+export interface ValuedPosition {
+  dto: PositionDto;
+  warning?: PositionWarning;
+}
+
+/** Pure: prices one position; a missing price is reported back, not pushed into shared state. */
 export function valuePosition(
   position: ComputedPosition,
   instrument: InstrumentRecord | undefined,
   price: PriceSnapshot | null,
   reservedQuantity: number,
-  warnings: PositionWarning[],
-): PositionDto {
+): ValuedPosition {
   const marketValue = price ? Money.of(price.close).times(position.quantity) : Money.zero();
-  if (!price) {
-    warnings.push({
-      code: 'NO_MARKET_PRICE',
-      instrumentId: position.instrumentId,
-      quantity: position.quantity,
-      detail: 'No market data for this instrument; market value reported as 0.00',
-    });
-  }
-  return {
+  const warning: PositionWarning | undefined = price
+    ? undefined
+    : {
+        code: 'NO_MARKET_PRICE',
+        instrumentId: position.instrumentId,
+        quantity: position.quantity,
+        detail: 'No market data for this instrument; market value reported as 0.00',
+      };
+  const dto: PositionDto = {
     instrumentId: position.instrumentId,
     ticker: instrument?.ticker ?? 'UNKNOWN',
     name: instrument?.name ?? 'Unknown instrument',
@@ -104,6 +120,7 @@ export function valuePosition(
     totalReturnPct: price ? percentChange(marketValue, position.costBasis) : null,
     dailyReturnPct: price?.dailyReturnPct ?? null,
   };
+  return warning ? { dto, warning } : { dto };
 }
 
 function latestDate(prices: readonly PriceSnapshot[]): string | null {
