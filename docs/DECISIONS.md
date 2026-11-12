@@ -155,6 +155,16 @@ Cash sides are deliberately **not** reachable through `POST /orders`: the DTO (d
 
 **Alternatives.** Accept `CASH_IN` / `CASH_OUT` in `POST /orders` (one validation schema for two unrelated operations, and the trading endpoint could create money); a dedicated `cash_movements` table (duplicates the ledger and contradicts the statement); seeding scripts only (what the k6 concurrency scenario used before; `scripts/seed-k6.ts` still exists for repeatable runs).
 
+## ADR-018 Pagination: offset for instruments, keyset cursor for orders
+
+**Context.** Two collections are paginated and they behave differently. Instruments are static reference data (65 rows), searched by relevance, where a client wants to jump to a page and show a total. Orders are an append-only history ordered by time that grows with every trade and receives inserts at the head while a client is paging.
+
+**Decision.** `GET /instruments` uses `page` / `limit` with `meta.total` (window count in the same query; a separate count past the last page). `GET /users/:userId/orders` uses a keyset cursor over `(datetime, id)` descending: the response carries `meta.nextCursor`, an opaque base64url token of the last row's key, and the next page is `WHERE (datetime, id) < (cursor)` served by the `orders (userid, datetime DESC, id DESC)` index. No total is returned for orders. The cursor travels as a query parameter: it identifies the page, so it belongs in the resource address (bookmarkable, loggable, usable from curl), which is also the convention of Stripe-, Slack- and Twitter-style APIs; a `Link: <url>; rel="next"` response header would be an additive complement, not a replacement.
+
+**Consequences.** Instrument pages are simple and countable. Order pages cost one index range scan regardless of depth, and a new order cannot shift or duplicate rows the client already saw. The cursor is validated strictly (ISO UTC datetime, int4 id) before it reaches the database, so a tampered token is a 400 rather than a database error.
+
+**Alternatives.** Offset paging for orders (skips or repeats rows under concurrent inserts, cost grows linearly with depth); cursor paging for instruments (needless for a 65-row static list and loses the total); cursor in a request header (less discoverable in Swagger, not linkable, no benefit).
+
 ## Known limitations and next steps
 
 - Positions are recomputed from the ledger on every read. This is correct and simple at this scale; the scale-out path is a positions snapshot table maintained in the same transaction as the order insert (or a materialized view), documented here rather than built.

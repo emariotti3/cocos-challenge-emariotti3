@@ -155,6 +155,16 @@ Los sides de efectivo deliberadamente **no** son alcanzables por `POST /orders`:
 
 **Alternativas.** Aceptar `CASH_IN` / `CASH_OUT` en `POST /orders` (un esquema de validación para dos operaciones sin relación, y el endpoint de trading podría crear dinero); una tabla `cash_movements` dedicada (duplica el ledger y contradice el enunciado); solo scripts de seed (lo que usaba el escenario de concurrencia de k6; `scripts/seed-k6.ts` sigue existiendo para corridas repetibles).
 
+## ADR-018 Paginación: offset para instrumentos, cursor keyset para órdenes
+
+**Contexto.** Se paginan dos colecciones y se comportan distinto. Los instrumentos son datos de referencia estáticos (65 filas), buscados por relevancia, donde el cliente quiere saltar a una página y mostrar un total. Las órdenes son un historial de solo inserción ordenado por tiempo, que crece con cada operación y recibe filas nuevas al principio mientras un cliente está paginando.
+
+**Decisión.** `GET /instruments` usa `page` / `limit` con `meta.total` (conteo por ventana en la misma consulta; un conteo aparte pasada la última página). `GET /users/:userId/orders` usa un cursor keyset sobre `(datetime, id)` descendente: la respuesta lleva `meta.nextCursor`, un token opaco base64url con la clave de la última fila, y la página siguiente es `WHERE (datetime, id) < (cursor)`, servida por el índice `orders (userid, datetime DESC, id DESC)`. Las órdenes no devuelven total. El cursor viaja como parámetro de query: identifica la página, así que pertenece a la dirección del recurso (se puede guardar, loguear y usar desde curl), que es además la convención de las APIs estilo Stripe, Slack o Twitter; un header de respuesta `Link: <url>; rel="next"` sería un complemento aditivo, no un reemplazo.
+
+**Consecuencias.** Las páginas de instrumentos son simples y contables. Las páginas de órdenes cuestan un solo recorrido de rango del índice sin importar la profundidad, y una orden nueva no puede correr ni duplicar filas que el cliente ya vio. El cursor se valida estrictamente (datetime ISO UTC, id int4) antes de llegar a la base, así que un token manipulado es un 400 y no un error de base de datos.
+
+**Alternativas.** Paginación por offset para órdenes (saltea o repite filas con inserciones concurrentes, costo lineal con la profundidad); cursor para instrumentos (innecesario para una lista estática de 65 filas y pierde el total); cursor en un header del request (menos descubrible en Swagger, no enlazable, sin beneficio).
+
 ## Limitaciones conocidas y próximos pasos
 
 - Las posiciones se recalculan desde el ledger en cada lectura. Es correcto y simple a esta escala; el camino de crecimiento es una tabla de snapshot de posiciones mantenida en la misma transacción que el INSERT de la orden (o una vista materializada), documentado aquí en lugar de construido.
