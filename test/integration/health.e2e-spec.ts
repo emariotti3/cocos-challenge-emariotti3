@@ -41,6 +41,16 @@ describe('Operational endpoints', () => {
     expect(res.headers['x-request-id']).toBe('test-request-123');
   });
 
+  it('exposes Prometheus metrics with the text exposition content type', async () => {
+    await api().get('/api/v1/users/1/portfolio').expect(200);
+    const res = await api().get('/metrics').expect(200);
+    expect(res.headers['content-type']).toMatch(/^text\/plain;.*version=0\.0\.4/);
+    expect(res.text).toContain('# TYPE http_server_request_duration_seconds histogram');
+    expect(res.text).toMatch(/route="\/api\/v1\/users\/:userId\/portfolio"/);
+    expect(res.text).toContain('db_pool_connections{');
+    expect(res.text).toContain('orders_placed_total');
+  });
+
   it('sets security headers and hides the server stack', async () => {
     const res = await api().get('/health/live').expect(200);
     expect(res.headers['x-powered-by']).toBeUndefined();

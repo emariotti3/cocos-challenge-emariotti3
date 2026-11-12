@@ -10,6 +10,7 @@ import { Money } from '../../common/money/money';
 import { encodeCursor } from '../../common/pagination/cursor';
 import type { InstrumentsRepository } from '../instruments/instruments.repository';
 import type { MarketdataService } from '../marketdata/marketdata.service';
+import type { MetricsService } from '../../observability/metrics/metrics.service';
 import type { PortfolioRepository } from '../portfolio/portfolio.repository';
 import type { UsersRepository } from '../users/users.repository';
 import type { PlaceOrderDto } from './dto/place-order.dto';
@@ -37,6 +38,10 @@ describe('OrdersService', () => {
     getAvailableShares: jest.fn(),
   } as unknown as jest.Mocked<PortfolioRepository>;
 
+  const metrics = {
+    recordOrder: jest.fn(),
+    recordCancellation: jest.fn(),
+  } as unknown as jest.Mocked<MetricsService>;
   const service = new OrdersService(
     sequelize,
     orders,
@@ -44,6 +49,7 @@ describe('OrdersService', () => {
     instruments,
     marketdata,
     ledger,
+    metrics,
   );
   const user = { id: 1, email: 'emiliano@test.com', accountNumber: '10001' };
   const pamp = {

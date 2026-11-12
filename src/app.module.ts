@@ -8,12 +8,14 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { PortfolioModule } from './modules/portfolio/portfolio.module';
 import { UsersModule } from './modules/users/users.module';
 import { LoggingModule } from './observability/logging/logging.module';
+import { MetricsModule } from './observability/metrics/metrics.module';
 
 @Module({
   imports: [
     ConfigModule,
     LoggingModule,
     DatabaseModule,
+    MetricsModule,
     ThrottlingModule,
     HealthModule,
     UsersModule,

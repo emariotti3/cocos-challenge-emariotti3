@@ -11,6 +11,7 @@ import { Logger } from 'nestjs-pino';
 import { ProblemDetailsFilter } from './common/filters/problem-details.filter';
 import { validationExceptionFactory } from './common/pipes/validation-exception.factory';
 import { AppConfig } from './config/app.config';
+import { MetricsService } from './observability/metrics/metrics.service';
 
 export const API_PREFIX = 'api';
 export const API_VERSION = '1';
@@ -31,6 +32,7 @@ export function setupApp(app: NestExpressApplication): INestApplication {
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
 
+  app.use(app.get(MetricsService).httpMiddleware());
   app.use(helmet());
   app.enableCors({ origin: config.corsOrigins, methods: ['GET', 'POST', 'OPTIONS'] });
 
