@@ -1,4 +1,4 @@
-import type { Sequelize, Transaction } from 'sequelize';
+import type { Transaction } from 'sequelize';
 import {
   InstrumentType,
   OrderSide,
@@ -19,9 +19,6 @@ import { OrdersService } from './orders.service';
 
 describe('OrdersService', () => {
   const transaction = { id: 'tx' } as unknown as Transaction;
-  const sequelize = {
-    transaction: jest.fn((callback: (t: Transaction) => Promise<unknown>) => callback(transaction)),
-  } as unknown as jest.Mocked<Sequelize>;
   const orders = {
     create: jest.fn(),
     findByIdForUser: jest.fn(),
@@ -29,7 +26,9 @@ describe('OrdersService', () => {
     listByUser: jest.fn(),
   } as unknown as jest.Mocked<OrdersRepository>;
   const users = {
-    lockForUpdate: jest.fn().mockResolvedValue(true),
+    withLock: jest.fn((_userId: number, work: (t: Transaction) => Promise<unknown>) =>
+      work(transaction),
+    ),
   } as unknown as jest.Mocked<UsersRepository>;
   const instruments = { findById: jest.fn() } as unknown as jest.Mocked<InstrumentsRepository>;
   const marketdata = { getLatestPrice: jest.fn() } as unknown as jest.Mocked<MarketdataService>;
@@ -42,15 +41,7 @@ describe('OrdersService', () => {
     recordOrder: jest.fn(),
     recordCancellation: jest.fn(),
   } as unknown as jest.Mocked<MetricsService>;
-  const service = new OrdersService(
-    sequelize,
-    orders,
-    users,
-    instruments,
-    marketdata,
-    ledger,
-    metrics,
-  );
+  const service = new OrdersService(orders, users, instruments, marketdata, ledger, metrics);
   const user = { id: 1, email: 'emiliano@test.com', accountNumber: '10001' };
   const pamp = {
     id: 47,
@@ -76,6 +67,7 @@ describe('OrdersService', () => {
   });
 
   beforeEach(() => {
+    jest.clearAllMocks();
     instruments.findById.mockResolvedValue(pamp);
     marketdata.getLatestPrice.mockResolvedValue({
       instrumentId: 47,
@@ -115,7 +107,7 @@ describe('OrdersService', () => {
     it('fills a MARKET BUY at the last close inside a locked transaction', async () => {
       const result = await place({ size: 10 });
 
-      expect(users.lockForUpdate).toHaveBeenCalledWith(1, transaction);
+      expect(users.withLock).toHaveBeenCalledWith(1, expect.any(Function));
       expect(ledger.getCashSummary).toHaveBeenCalledWith(1, transaction);
       expect(orders.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -186,7 +178,7 @@ describe('OrdersService', () => {
         code: 'INSTRUMENT_NOT_FOUND',
         status: 404,
       });
-      expect(sequelize.transaction).not.toHaveBeenCalled();
+      expect(users.withLock).not.toHaveBeenCalled();
     });
 
     it('rejects the cash instrument with 422 NOT_TRADABLE', async () => {

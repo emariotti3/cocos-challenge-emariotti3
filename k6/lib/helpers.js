@@ -51,6 +51,19 @@ export function cancelOrder(orderId, userId = USER_ID) {
   return res;
 }
 
+/** kind: 'deposits' | 'withdrawals'. Whole ARS. */
+export function cashMovement(kind, amount, userId = USER_ID) {
+  const res = http.post(`${API}/users/${userId}/cash/${kind}`, JSON.stringify({ amount }), {
+    headers: JSON_HEADERS,
+    tags: { name: `cash_${kind}` },
+  });
+  check(res, {
+    'cash 201': (r) => r.status === 201,
+    'cash has status': (r) => ['FILLED', 'REJECTED'].includes(r.json('status')),
+  });
+  return res;
+}
+
 export function pick(list) {
   return list[Math.floor(Math.random() * list.length)];
 }

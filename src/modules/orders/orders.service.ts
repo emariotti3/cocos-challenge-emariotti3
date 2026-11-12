@@ -1,8 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { InjectConnection } from '@nestjs/sequelize';
-import type { Sequelize } from 'sequelize';
 import { InstrumentType, OrderSide, OrderStatus, OrderType } from '../../common/domain/enums';
 import { ConflictError, NotFoundError, UnprocessableError } from '../../common/errors/app.error';
+import { logOperationFailure } from '../../common/logging/operation-log';
 import { Money } from '../../common/money/money';
 import { decodeCursor, encodeCursor } from '../../common/pagination/cursor';
 import {
@@ -24,7 +23,6 @@ export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
 
   constructor(
-    @InjectConnection() private readonly sequelize: Sequelize,
     private readonly orders: OrdersRepository,
     private readonly users: UsersRepository,
     private readonly instruments: InstrumentsRepository,
@@ -37,95 +35,133 @@ export class OrdersService {
    * Places an order. Validation that cannot be expressed on the DTO happens
    * here (unknown/non-tradable instrument, missing market price, budget too
    * small). The acceptance decision and the insert run in one transaction
-   * under a per-user row lock, so two concurrent orders cannot both spend the
-   * same cash or shares. Rejected orders are persisted (status REJECTED) and
-   * returned with 201, as the challenge requires.
+   * under a per-user row lock (`UsersRepository.withLock`), so two concurrent
+   * orders cannot both spend the same cash or shares. Rejected orders are
+   * persisted (status REJECTED) and returned with 201, as the challenge
+   * requires.
    */
   async placeOrder(user: UserRecord, dto: PlaceOrderDto): Promise<OrderResponseDto> {
-    const instrument = await this.loadTradableInstrument(dto.instrumentId);
-    const price = await this.resolveExecutionPrice(dto, instrument);
-    const size = this.resolveSize(dto, price);
-    const notional = price.times(size);
+    const context: Record<string, unknown> = {
+      operation: 'placeOrder',
+      userId: user.id,
+      instrumentId: dto.instrumentId,
+      side: dto.side,
+      type: dto.type,
+      requestedSize: dto.size,
+      requestedAmount: dto.amount,
+      requestedPrice: dto.price,
+    };
+    this.logger.debug(context, 'Order received');
 
-    const record = await this.sequelize.transaction(async (transaction) => {
-      await this.users.lockForUpdate(user.id, transaction);
-      const cash = await this.ledger.getCashSummary(user.id, transaction);
-      const availableShares =
-        dto.side === OrderSide.SELL
-          ? await this.ledger.getAvailableShares(user.id, instrument.id, transaction)
-          : 0;
-      const decision = decideOrder({
-        side: dto.side,
-        type: dto.type,
-        size,
-        notional,
-        availableCash: cash.available,
-        availableShares,
-      });
-      return this.orders.create(
-        {
-          userId: user.id,
-          instrumentId: instrument.id,
-          ticker: instrument.ticker,
+    let record: OrderRecord;
+    try {
+      const instrument = await this.loadTradableInstrument(dto.instrumentId);
+      const price = await this.resolveExecutionPrice(dto, instrument);
+      const size = this.resolveSize(dto, price);
+      const notional = price.times(size);
+      Object.assign(context, { ticker: instrument.ticker, size, price: price.toFixed() });
+
+      record = await this.users.withLock(user.id, async (transaction) => {
+        const cash = await this.ledger.getCashSummary(user.id, transaction);
+        const availableShares =
+          dto.side === OrderSide.SELL
+            ? await this.ledger.getAvailableShares(user.id, instrument.id, transaction)
+            : 0;
+        const decision = decideOrder({
           side: dto.side,
           type: dto.type,
-          status: decision.status,
           size,
-          price: price.toFixed(2),
-          rejectionReason: decision.rejectionReason,
-        },
-        transaction,
-      );
-    });
+          notional,
+          availableCash: cash.available,
+          availableShares,
+        });
+        this.logger.debug(
+          {
+            ...context,
+            notional: notional.toFixed(),
+            totalCash: cash.total.toFixed(),
+            reservedCash: cash.reserved.toFixed(),
+            availableCash: cash.available.toFixed(),
+            availableShares,
+            decision: decision.status,
+            rejectionReason: decision.rejectionReason,
+          },
+          'Order decided under user lock',
+        );
+        return this.orders.create(
+          {
+            userId: user.id,
+            instrumentId: instrument.id,
+            ticker: instrument.ticker,
+            side: dto.side,
+            type: dto.type,
+            status: decision.status,
+            size,
+            price: price.toFixed(2),
+            rejectionReason: decision.rejectionReason,
+          },
+          transaction,
+        );
+      });
+    } catch (error) {
+      logOperationFailure(this.logger, 'Order placement', context, error);
+      throw error;
+    }
 
     this.metrics.recordOrder(record);
-    this.logger.log(
-      {
-        userId: user.id,
-        orderId: record.id,
-        instrumentId: record.instrumentId,
-        side: record.side,
-        type: record.type,
-        status: record.status,
-        rejectionReason: record.rejectionReason,
-        size: record.size,
-        price: record.price,
-      },
-      'Order processed',
-    );
+    this.logOutcome(record, 'Order placed');
     return toOrderResponse(record);
   }
 
   /** Only NEW orders can be cancelled; anything else is a 409. */
   async cancelOrder(user: UserRecord, orderId: number): Promise<OrderResponseDto> {
-    const record = await this.sequelize.transaction(async (transaction) => {
-      await this.users.lockForUpdate(user.id, transaction);
-      const changed = await this.orders.transitionStatus(
-        user.id,
-        orderId,
-        OrderStatus.NEW,
-        OrderStatus.CANCELLED,
-        transaction,
-      );
-      const order = await this.orders.findByIdForUser(user.id, orderId, transaction);
-      if (!order) {
-        throw new NotFoundError(
-          'ORDER_NOT_FOUND',
-          `Order ${orderId} does not exist for this user`,
-          { orderId },
+    const context = { operation: 'cancelOrder', userId: user.id, orderId };
+    this.logger.debug(context, 'Cancellation received');
+
+    let record: OrderRecord;
+    try {
+      record = await this.users.withLock(user.id, async (transaction) => {
+        const changed = await this.orders.transitionStatus(
+          user.id,
+          orderId,
+          OrderStatus.NEW,
+          OrderStatus.CANCELLED,
+          transaction,
         );
-      }
-      if (changed === 0) {
-        throw new ConflictError(
-          'ORDER_NOT_CANCELLABLE',
-          `Order ${orderId} is ${order.status}; only NEW orders can be cancelled`,
-          { orderId, orderStatus: order.status },
-        );
-      }
-      return order;
-    });
+        const order = await this.orders.findByIdForUser(user.id, orderId, transaction);
+        if (!order) {
+          throw new NotFoundError(
+            'ORDER_NOT_FOUND',
+            `Order ${orderId} does not exist for this user`,
+            { orderId },
+          );
+        }
+        if (changed === 0) {
+          throw new ConflictError(
+            'ORDER_NOT_CANCELLABLE',
+            `Order ${orderId} is ${order.status}; only NEW orders can be cancelled`,
+            { orderId, orderStatus: order.status },
+          );
+        }
+        return order;
+      });
+    } catch (error) {
+      logOperationFailure(this.logger, 'Order cancellation', context, error);
+      throw error;
+    }
+
     this.metrics.recordCancellation();
-    this.logger.log({ userId: user.id, orderId }, 'Order cancelled');
+    this.logger.log(
+      {
+        ...context,
+        instrumentId: record.instrumentId,
+        side: record.side,
+        size: record.size,
+        price: record.price,
+        releasedNotional: Money.of(record.price).times(record.size).toFixed(),
+      },
+      'Order cancelled',
+    );
     return toOrderResponse(record);
   }
 
@@ -161,6 +197,29 @@ export class OrdersService {
     };
   }
 
+  /** Rejections are warnings (a signal worth alerting on in volume); fills and resting orders are info. */
+  private logOutcome(record: OrderRecord, message: string): void {
+    const payload = {
+      operation: 'placeOrder',
+      userId: record.userId,
+      orderId: record.id,
+      instrumentId: record.instrumentId,
+      ticker: record.ticker,
+      side: record.side,
+      type: record.type,
+      status: record.status,
+      rejectionReason: record.rejectionReason,
+      size: record.size,
+      price: record.price,
+      notional: Money.of(record.price).times(record.size).toFixed(),
+    };
+    if (record.status === OrderStatus.REJECTED) {
+      this.logger.warn(payload, `${message}: rejected by market rules`);
+    } else {
+      this.logger.log(payload, message);
+    }
+  }
+
   private async loadTradableInstrument(instrumentId: number): Promise<InstrumentRecord> {
     const instrument = await this.instruments.findById(instrumentId);
     if (!instrument) {
@@ -171,10 +230,8 @@ export class OrdersService {
     if (instrument.type === InstrumentType.MONEDA) {
       throw new UnprocessableError(
         'NOT_TRADABLE',
-        `${instrument.ticker} is a currency and cannot be traded`,
-        {
-          instrumentId,
-        },
+        `${instrument.ticker} is a currency and cannot be traded; use the cash endpoints for deposits and withdrawals`,
+        { instrumentId },
       );
     }
     return instrument;

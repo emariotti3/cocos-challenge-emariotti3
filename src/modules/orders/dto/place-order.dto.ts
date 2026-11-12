@@ -79,8 +79,16 @@ export class PlaceOrderDto {
   @IsInt()
   instrumentId!: number;
 
-  @ApiProperty({ enum: [OrderSide.BUY, OrderSide.SELL], example: OrderSide.BUY })
-  @IsIn([OrderSide.BUY, OrderSide.SELL])
+  @ApiProperty({
+    enum: [OrderSide.BUY, OrderSide.SELL],
+    example: OrderSide.BUY,
+    description:
+      'Only BUY and SELL are accepted here. Cash transfers (CASH_IN / CASH_OUT) are recorded through POST /users/:userId/cash/deposits and /withdrawals.',
+  })
+  @IsIn([OrderSide.BUY, OrderSide.SELL], {
+    message:
+      'side must be BUY or SELL; cash transfers use POST /users/:userId/cash/deposits or /withdrawals',
+  })
   side!: TradeSide;
 
   @ApiProperty({

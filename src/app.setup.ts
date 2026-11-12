@@ -65,6 +65,7 @@ export function buildOpenApiConfig(builder: DocumentBuilder) {
     .addTag('instruments', 'Instrument search and market data')
     .addTag('portfolio', 'Account value, cash and positions')
     .addTag('orders', 'Order placement, cancellation and history')
+    .addTag('cash', 'Deposits (CASH_IN) and withdrawals (CASH_OUT)')
     .build();
 }
 
