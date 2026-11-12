@@ -8,7 +8,7 @@
 
 REST API for a brokerage account: **portfolio valuation**, **instrument search** and **order placement** (MARKET / LIMIT, with cancellation) on top of the provided Postgres schema. Built as a production-style service: validated configuration, migrations, structured logs, RFC 7807 errors, rate limiting, health checks, Prometheus metrics with a Grafana dashboard, unit + integration + load tests, and a CI pipeline.
 
-The original statement is in [`backend-challenge.md`](backend-challenge.md). Every assumption and design choice is documented in [`docs/DECISIONS.md`](docs/DECISIONS.md).
+The original statement is in [`backend-challenge.md`](backend-challenge.md). Every assumption and design choice is documented in [`docs/DECISIONS.md`](docs/DECISIONS.md) (also in Spanish: [`docs/DECISIONS.es.md`](docs/DECISIONS.es.md)).
 
 ## Contents
 

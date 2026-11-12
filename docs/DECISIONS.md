@@ -1,6 +1,6 @@
 # Design decisions and assumptions
 
-Architecture Decision Records for the Cocos backend challenge. Each entry states the context, the decision, its consequences and the alternatives considered. Numbers quoted for "user 1" refer to the dataset shipped in `database.sql`.
+Architecture Decision Records for the Cocos backend challenge. Each entry states the context, the decision, its consequences and the alternatives considered. Numbers quoted for "user 1" refer to the dataset shipped in `database.sql`. Spanish version: [DECISIONS.es.md](DECISIONS.es.md).
 
 ## ADR-001 NestJS modular monolith
 
