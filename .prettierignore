@@ -3,11 +3,7 @@ coverage
 node_modules
 docs/openapi.json
 docker/grafana/provisioning/dashboards/*.json
-# challenge statement files are kept verbatim
+# challenge statement is kept verbatim
 backend-challenge.md
-frontend-challenge.md
-fullstack-challenge.md
-qa-challenge.md
-react-native-challenge.md
 IMPLEMENTATION_PLAN.md
 database.sql
