@@ -3,6 +3,8 @@ import { ConfigModule } from './config/config.module';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
 import { InstrumentsModule } from './modules/instruments/instruments.module';
+import { PortfolioModule } from './modules/portfolio/portfolio.module';
+import { UsersModule } from './modules/users/users.module';
 import { LoggingModule } from './observability/logging/logging.module';
 
 @Module({
@@ -11,7 +13,9 @@ import { LoggingModule } from './observability/logging/logging.module';
     LoggingModule,
     DatabaseModule,
     HealthModule,
+    UsersModule,
     InstrumentsModule,
+    PortfolioModule,
   ],
 })
 export class AppModule {}
