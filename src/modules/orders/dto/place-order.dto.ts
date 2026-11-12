@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
   IsEnum,
   IsIn,
@@ -9,17 +10,19 @@ import {
   ValidateIf,
   type ValidationArguments,
 } from 'class-validator';
+import {
+  MAX_AMOUNT_EXCLUSIVE,
+  MAX_ORDER_SIZE,
+  MAX_PRICE_EXCLUSIVE,
+  MONEY_DECIMALS,
+} from '../../../common/domain/constants';
 import { OrderSide, OrderType } from '../../../common/domain/enums';
 import {
   IsPositiveDecimal,
   isPositiveDecimal,
 } from '../../../common/validation/decimal.validators';
-
-export const MAX_ORDER_SIZE = 1_000_000_000;
-/** NUMERIC(10,2) upper bound for prices. */
-export const MAX_PRICE_EXCLUSIVE = 100_000_000;
-/** Budget cap; keeps floor(amount / price) comfortably inside MAX_ORDER_SIZE for any price >= 0.01. */
-export const MAX_AMOUNT_EXCLUSIVE = 10_000_000_000;
+import { PG_INT_MAX } from '../../../common/validation/limits';
+import { trim } from '../../../common/validation/transforms';
 
 export type TradeSide = OrderSide.BUY | OrderSide.SELL;
 
@@ -56,7 +59,10 @@ function PriceMatchesOrderType() {
           if (type === OrderType.LIMIT) {
             return (
               value !== undefined &&
-              isPositiveDecimal(value, { maxDecimals: 2, lessThan: MAX_PRICE_EXCLUSIVE })
+              isPositiveDecimal(value, {
+                maxDecimals: MONEY_DECIMALS,
+                lessThan: MAX_PRICE_EXCLUSIVE,
+              })
             );
           }
           return true; // an invalid type is reported by @IsEnum on `type`
@@ -75,12 +81,21 @@ function PriceMatchesOrderType() {
 
 export class PlaceOrderDto {
   @ApiProperty({ example: 47, description: 'Instrument id (see GET /instruments)' })
+  @Max(PG_INT_MAX)
   @IsPositive()
   @IsInt()
   instrumentId!: number;
 
-  @ApiProperty({ enum: [OrderSide.BUY, OrderSide.SELL], example: OrderSide.BUY })
-  @IsIn([OrderSide.BUY, OrderSide.SELL])
+  @ApiProperty({
+    enum: [OrderSide.BUY, OrderSide.SELL],
+    example: OrderSide.BUY,
+    description:
+      'Only BUY and SELL are accepted here. Cash transfers (CASH_IN / CASH_OUT) are recorded through POST /users/:userId/cash/deposits and /withdrawals.',
+  })
+  @IsIn([OrderSide.BUY, OrderSide.SELL], {
+    message:
+      'side must be BUY or SELL; cash transfers use POST /users/:userId/cash/deposits or /withdrawals',
+  })
   side!: TradeSide;
 
   @ApiProperty({
@@ -109,8 +124,9 @@ export class PlaceOrderDto {
     description:
       'ARS budget. Converted to the maximum whole number of shares at the execution price (close for MARKET, `price` for LIMIT). No fractional shares.',
   })
+  @Transform(trim)
   @ValidateIf((dto: PlaceOrderDto) => dto.amount !== undefined)
-  @IsPositiveDecimal({ maxDecimals: 2, lessThan: MAX_AMOUNT_EXCLUSIVE })
+  @IsPositiveDecimal({ maxDecimals: MONEY_DECIMALS, lessThan: MAX_AMOUNT_EXCLUSIVE })
   @NotWithSize()
   amount?: string | number;
 
@@ -119,6 +135,7 @@ export class PlaceOrderDto {
     example: '900.00',
     description: 'Limit price in ARS. Required for LIMIT, forbidden for MARKET.',
   })
+  @Transform(trim)
   @ValidateIf((dto: PlaceOrderDto) => dto.price !== undefined || dto.type === OrderType.LIMIT)
   @PriceMatchesOrderType()
   price?: string | number;

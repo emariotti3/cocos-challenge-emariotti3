@@ -11,15 +11,10 @@ import { Logger } from 'nestjs-pino';
 import { ProblemDetailsFilter } from './common/filters/problem-details.filter';
 import { validationExceptionFactory } from './common/pipes/validation-exception.factory';
 import { AppConfig } from './config/app.config';
+import { API_PREFIX, API_VERSION, OPERATIONAL_ROUTES } from './common/http/constants';
 import { MetricsService } from './observability/metrics/metrics.service';
 
-export const API_PREFIX = 'api';
-export const API_VERSION = '1';
-
-const UNPREFIXED_ROUTES = ['health', 'health/live', 'health/ready', 'metrics'].map((path) => ({
-  path,
-  method: RequestMethod.ALL,
-}));
+const UNPREFIXED_ROUTES = OPERATIONAL_ROUTES.map((path) => ({ path, method: RequestMethod.ALL }));
 
 /**
  * Applies the cross-cutting HTTP configuration. Shared by `main.ts` and the
@@ -65,6 +60,7 @@ export function buildOpenApiConfig(builder: DocumentBuilder) {
     .addTag('instruments', 'Instrument search and market data')
     .addTag('portfolio', 'Account value, cash and positions')
     .addTag('orders', 'Order placement, cancellation and history')
+    .addTag('cash', 'Deposits (CASH_IN) and withdrawals (CASH_OUT)')
     .build();
 }
 

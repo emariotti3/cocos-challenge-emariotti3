@@ -30,6 +30,3 @@ export enum RejectionReason {
   INSUFFICIENT_FUNDS = 'INSUFFICIENT_FUNDS',
   INSUFFICIENT_SHARES = 'INSUFFICIENT_SHARES',
 }
-
-/** Instrument id of the ARS cash instrument in the provided dataset. */
-export const CASH_TICKER = 'ARS';

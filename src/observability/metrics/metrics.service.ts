@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/sequelize';
 import type { NextFunction, Request, Response } from 'express';
 import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from 'prom-client';
 import type { Sequelize } from 'sequelize';
 import type { OrderSide, OrderStatus, OrderType, RejectionReason } from '../../common/domain/enums';
+import { SERVICE_NAME } from '../../common/http/constants';
 
 interface PoolStats {
   size: number;
@@ -24,13 +25,15 @@ function poolOf(sequelize: Sequelize): PoolStats | undefined {
   };
 }
 
+const NOT_FOUND: number = HttpStatus.NOT_FOUND;
+
 /** Route template (bounded cardinality) rather than the raw URL. */
 function routeOf(request: Request, response: Response): string {
   const route: unknown = (request as unknown as { route?: unknown }).route;
   const template =
     typeof route === 'object' && route !== null ? (route as { path?: unknown }).path : undefined;
   if (typeof template === 'string') return template;
-  return response.statusCode === 404 ? 'unmatched' : request.path;
+  return response.statusCode === NOT_FOUND ? 'unmatched' : request.path;
 }
 
 /**
@@ -77,7 +80,7 @@ export class MetricsService {
   });
 
   constructor(@InjectConnection() sequelize: Sequelize) {
-    this.registry.setDefaultLabels({ service: 'cocos-api' });
+    this.registry.setDefaultLabels({ service: SERVICE_NAME });
     collectDefaultMetrics({ register: this.registry });
     new Gauge({
       name: 'db_pool_connections',

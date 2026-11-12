@@ -1,3 +1,4 @@
+import { STATUS_CODES } from 'node:http';
 import {
   type ArgumentsHost,
   Catch,
@@ -8,32 +9,25 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AppError } from '../errors/app.error';
+import { ErrorCode } from '../errors/error-codes';
 import { type ProblemDetails, problemTypeFor } from '../errors/problem-details';
 
-const STATUS_TITLES: Record<number, string> = {
-  400: 'Bad Request',
-  401: 'Unauthorized',
-  403: 'Forbidden',
-  404: 'Not Found',
-  405: 'Method Not Allowed',
-  409: 'Conflict',
-  413: 'Payload Too Large',
-  415: 'Unsupported Media Type',
-  422: 'Unprocessable Entity',
-  429: 'Too Many Requests',
-  500: 'Internal Server Error',
-  503: 'Service Unavailable',
-};
+/** Everything from here up is logged as a server failure (`statusCode` is a plain number on the wire). */
+const FIRST_SERVER_ERROR: number = HttpStatus.INTERNAL_SERVER_ERROR;
 
-const CODE_BY_STATUS: Record<number, string> = {
-  400: 'BAD_REQUEST',
-  404: 'ROUTE_NOT_FOUND',
-  405: 'METHOD_NOT_ALLOWED',
-  413: 'PAYLOAD_TOO_LARGE',
-  415: 'UNSUPPORTED_MEDIA_TYPE',
-  429: 'RATE_LIMITED',
-  500: 'INTERNAL_ERROR',
-  503: 'SERVICE_UNAVAILABLE',
+/** RFC 7807 `title`: the standard reason phrase, as Node knows it. */
+const titleFor = (status: number): string => STATUS_CODES[status] ?? 'Error';
+
+/** Stable `code` for framework-raised HttpExceptions that do not carry one. */
+const CODE_BY_STATUS: Partial<Record<HttpStatus, string>> = {
+  [HttpStatus.BAD_REQUEST]: ErrorCode.BAD_REQUEST,
+  [HttpStatus.NOT_FOUND]: ErrorCode.ROUTE_NOT_FOUND,
+  [HttpStatus.METHOD_NOT_ALLOWED]: ErrorCode.METHOD_NOT_ALLOWED,
+  [HttpStatus.PAYLOAD_TOO_LARGE]: ErrorCode.PAYLOAD_TOO_LARGE,
+  [HttpStatus.UNSUPPORTED_MEDIA_TYPE]: ErrorCode.UNSUPPORTED_MEDIA_TYPE,
+  [HttpStatus.TOO_MANY_REQUESTS]: ErrorCode.RATE_LIMITED,
+  [HttpStatus.INTERNAL_SERVER_ERROR]: ErrorCode.INTERNAL_ERROR,
+  [HttpStatus.SERVICE_UNAVAILABLE]: ErrorCode.SERVICE_UNAVAILABLE,
 };
 
 /**
@@ -52,7 +46,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
 
     const problem = this.toProblem(exception, request);
 
-    if (problem.status >= 500) {
+    if (problem.status >= FIRST_SERVER_ERROR) {
       this.logger.error(
         { err: exception, requestId: problem.requestId, path: request.url },
         'Unhandled error while processing request',
@@ -71,7 +65,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
         // extension members first so they can never shadow the standard ones
         ...(exception.details ?? {}),
         type: problemTypeFor(exception.code),
-        title: STATUS_TITLES[exception.status] ?? 'Error',
+        title: titleFor(exception.status),
         status: exception.status,
         detail: exception.message,
         instance,
@@ -88,7 +82,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       const code =
         typeof fromBody['code'] === 'string'
           ? fromBody['code']
-          : (CODE_BY_STATUS[status] ?? 'HTTP_ERROR');
+          : (CODE_BY_STATUS[status as HttpStatus] ?? ErrorCode.HTTP_ERROR);
       const detail =
         typeof body === 'string'
           ? body
@@ -103,7 +97,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
 
       return {
         type: problemTypeFor(code),
-        title: STATUS_TITLES[status] ?? 'Error',
+        title: titleFor(status),
         status,
         detail,
         instance,
@@ -115,12 +109,12 @@ export class ProblemDetailsFilter implements ExceptionFilter {
 
     const status = HttpStatus.INTERNAL_SERVER_ERROR;
     return {
-      type: problemTypeFor('INTERNAL_ERROR'),
-      title: STATUS_TITLES[status] ?? 'Error',
+      type: problemTypeFor(ErrorCode.INTERNAL_ERROR),
+      title: titleFor(status),
       status,
       detail: 'An unexpected error occurred',
       instance,
-      code: 'INTERNAL_ERROR',
+      code: ErrorCode.INTERNAL_ERROR,
       requestId,
     };
   }

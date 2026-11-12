@@ -8,4 +8,5 @@ module.exports = {
   testMatch: ['<rootDir>/src/**/*.spec.ts'],
   moduleFileExtensions: ['ts', 'js', 'json'],
   clearMocks: true,
+  setupFiles: ['<rootDir>/test/setup/silence-nest-logger.ts'],
 };

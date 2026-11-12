@@ -32,6 +32,12 @@ describe('GET /api/v1/instruments', () => {
     expect(tickers(res.body).sort()).toEqual(['BBAR', 'BHIP', 'BMA', 'BPAT']);
   });
 
+  it('keeps reporting the total past the last page', async () => {
+    const res = await api().get('/api/v1/instruments?q=BANCO&limit=3&page=9').expect(200);
+    expect(res.body.data).toEqual([]);
+    expect(res.body.meta).toEqual({ page: 9, limit: 3, total: 4 });
+  });
+
   it('combines explicit ticker and name filters', async () => {
     const res = await api().get('/api/v1/instruments?ticker=GGAL&name=galicia').expect(200);
     expect(tickers(res.body)).toEqual(['GGAL']);
@@ -60,7 +66,7 @@ describe('GET /api/v1/instruments', () => {
     const page7 = await api().get('/api/v1/instruments?limit=10&page=7').expect(200);
     expect(page7.body.data).toHaveLength(5);
     const page8 = await api().get('/api/v1/instruments?limit=10&page=8').expect(200);
-    expect(page8.body).toEqual({ data: [], meta: { page: 8, limit: 10, total: 0 } });
+    expect(page8.body).toEqual({ data: [], meta: { page: 8, limit: 10, total: 65 } });
   });
 
   it('validates query parameters', async () => {

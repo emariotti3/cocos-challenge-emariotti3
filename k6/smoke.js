@@ -4,6 +4,7 @@ import { sleep } from 'k6';
 import { INSTRUMENT_ID, SEARCH_TERMS, summaryTrendStats } from './lib/config.js';
 import {
   cancelOrder,
+  cashMovement,
   health,
   pick,
   placeOrder,
@@ -36,6 +37,9 @@ export default function () {
     price: '1.00',
   });
   if (placed.status === 201 && placed.json('status') === 'NEW') cancelOrder(placed.json('id'));
+  // A deposit followed by a withdrawal of the same amount leaves the balance unchanged.
+  cashMovement('deposits', 1000);
+  cashMovement('withdrawals', 1000);
   sleep(0.5);
 }
 

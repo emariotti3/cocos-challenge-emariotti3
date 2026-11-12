@@ -8,9 +8,9 @@
 
 English version: [README.md](README.md).
 
-API REST para una cuenta comitente: **valuación del portafolio**, **búsqueda de instrumentos** y **envío de órdenes** (MARKET / LIMIT, con cancelación) sobre el esquema Postgres provisto. Construida como un servicio de producción: configuración validada, migraciones, logs estructurados, errores RFC 7807, rate limiting, health checks, métricas Prometheus con dashboard en Grafana, tests unitarios + de integración + de carga, y pipeline de CI.
+API REST para una cuenta comitente: **valuación del portafolio**, **búsqueda de instrumentos** y **envío de órdenes** (MARKET / LIMIT, con cancelación) y **depósitos / retiros de efectivo** sobre el esquema Postgres provisto. Construida como un servicio de producción: configuración validada, migraciones, logs estructurados, errores en formato RFC 7807 problem+json (un estándar para cuerpos de error HTTP), rate limiting, health checks, métricas Prometheus con dashboard en Grafana, tests unitarios + de integración + de carga, y pipeline de integración continua (CI).
 
-El enunciado original está en [`backend-challenge.md`](backend-challenge.md). Cada supuesto y decisión de diseño está documentado en [`docs/DECISIONS.es.md`](docs/DECISIONS.es.md) (también en inglés: [`docs/DECISIONS.md`](docs/DECISIONS.md)).
+El enunciado original está en [`backend-challenge.md`](backend-challenge.md). Cada supuesto y decisión de diseño está documentado como registros de decisiones de arquitectura (ADR, por sus siglas en inglés: una nota corta y numerada por decisión, con su contexto, la elección tomada, sus consecuencias y las alternativas descartadas) en [`docs/DECISIONS.es.md`](docs/DECISIONS.es.md) (también en inglés: [`docs/DECISIONS.md`](docs/DECISIONS.md)).
 
 Hay además una [página de resumen](https://claude.ai/artifact/U3Qu9VvY3gs7DziB4Ecf6g) en español con diagramas de secuencia de los flujos principales, el plan por etapas, la estructura del repo y las instrucciones para la colección Postman.
 
@@ -18,15 +18,16 @@ Hay además una [página de resumen](https://claude.ai/artifact/U3Qu9VvY3gs7DziB
 
 Si tenés diez minutos, estos archivos concentran la mayor parte del diseño:
 
-| Qué                                                              | Dónde                                                                                                                |
-| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| El test funcional del envío de órdenes que pide el enunciado     | [`test/integration/orders.e2e-spec.ts`](test/integration/orders.e2e-spec.ts) (pipeline HTTP real, Postgres real)     |
-| La regla de aceptación del mercado, como función pura            | [`src/modules/orders/domain/order-decision.ts`](src/modules/orders/domain/order-decision.ts)                         |
-| Efectivo, reservas y disponibilidad derivados del ledger         | [`src/modules/portfolio/portfolio.repository.ts`](src/modules/portfolio/portfolio.repository.ts)                     |
-| Replay de posiciones con costo promedio ponderado                | [`src/modules/portfolio/domain/position-calculator.ts`](src/modules/portfolio/domain/position-calculator.ts)         |
-| El candado por usuario que hace seguras las órdenes concurrentes | [`src/modules/users/users.repository.ts`](src/modules/users/users.repository.ts)                                     |
-| Cada cambio del esquema y su justificación                       | [`src/database/migrations/0002_constraints_and_indexes.ts`](src/database/migrations/0002_constraints_and_indexes.ts) |
-| Cada supuesto, con las alternativas descartadas                  | [`docs/DECISIONS.es.md`](docs/DECISIONS.es.md)                                                                       |
+| Qué                                                                                     | Dónde                                                                                                                                             |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| El test funcional del envío de órdenes que pide el enunciado                            | [`test/integration/orders.e2e-spec.ts`](test/integration/orders.e2e-spec.ts) (pipeline HTTP real, Postgres real)                                  |
+| La regla de aceptación del mercado, como función pura                                   | [`src/modules/orders/domain/order-decision.ts`](src/modules/orders/domain/order-decision.ts)                                                      |
+| Efectivo, reservas y disponibilidad derivados del ledger                                | [`src/modules/portfolio/portfolio.repository.ts`](src/modules/portfolio/portfolio.repository.ts)                                                  |
+| Replay de posiciones con costo promedio ponderado                                       | [`src/modules/portfolio/domain/position-calculator.ts`](src/modules/portfolio/domain/position-calculator.ts)                                      |
+| Depósitos y retiros como órdenes `CASH_IN` / `CASH_OUT`                                 | [`src/modules/cash/cash.service.ts`](src/modules/cash/cash.service.ts) y [`test/integration/cash.e2e-spec.ts`](test/integration/cash.e2e-spec.ts) |
+| El candado por usuario (`withLock`) que hace seguras las órdenes y retiros concurrentes | [`src/modules/users/users.repository.ts`](src/modules/users/users.repository.ts)                                                                  |
+| Cada cambio del esquema y su justificación                                              | [`src/database/migrations/0002_constraints_and_indexes.ts`](src/database/migrations/0002_constraints_and_indexes.ts)                              |
+| Cada supuesto, con las alternativas descartadas                                         | [`docs/DECISIONS.es.md`](docs/DECISIONS.es.md)                                                                                                    |
 
 ## Contenido
 
@@ -69,9 +70,11 @@ Ruta base `/api/v1`. Los valores monetarios son **strings decimales con dos deci
 | ------ | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `GET`  | `/instruments?q=&ticker=&name=&page=&limit=`                       | Búsqueda por ticker y/o nombre (sin distinguir mayúsculas, parcial, ordenada por similitud trigram). Devuelve último precio y retorno diario. Sin filtro = listado completo de instrumentos operables. |
 | `GET`  | `/instruments/:id`                                                 | Un instrumento con su último precio.                                                                                                                                                                   |
-| `GET`  | `/users/:userId/portfolio`                                         | Valor total de la cuenta, efectivo (`total`, `reserved`, `available`) y posiciones con valor de mercado, costo promedio, P&L y rendimientos.                                                           |
+| `GET`  | `/users/:userId/portfolio`                                         | Valor total de la cuenta, efectivo (`total`, `reserved`, `available`) y posiciones con valor de mercado, costo promedio, resultado (P&L, ganancia o pérdida) y rendimientos.                           |
 | `POST` | `/users/:userId/orders`                                            | Envía una orden. Devuelve `201` con estado `FILLED`, `NEW` **o `REJECTED`** (las rechazadas se persisten, como pide el enunciado).                                                                     |
 | `POST` | `/users/:userId/orders/:orderId/cancel`                            | Cancela una orden `NEW` (`409` en otro caso).                                                                                                                                                          |
+| `POST` | `/users/:userId/cash/deposits`                                     | Deposita pesos enteros. Se registra como una orden `FILLED` con side `CASH_IN` sobre el instrumento `ARS` (`price 1`, `size = amount`).                                                                |
+| `POST` | `/users/:userId/cash/withdrawals`                                  | Retira pesos enteros (side `CASH_OUT`). Se valida contra el efectivo _disponible_ bajo el mismo candado por usuario; si no alcanza, se persiste como `REJECTED`.                                       |
 | `GET`  | `/users/:userId/orders?status=&side=&instrumentId=&limit=&cursor=` | Historial de órdenes, más recientes primero, paginado por cursor.                                                                                                                                      |
 | `GET`  | `/users/:userId/orders/:orderId`                                   | Una orden.                                                                                                                                                                                             |
 | `GET`  | `/health/live`, `/health/ready`                                    | Liveness / readiness (ping a la base).                                                                                                                                                                 |
@@ -115,6 +118,7 @@ POST /api/v1/users/1/orders
 | Instrumento de efectivo, sin precio de mercado para una MARKET, presupuesto menor a una acción | 422  | `NOT_TRADABLE`, `NO_MARKET_PRICE`, `AMOUNT_TOO_SMALL`       |
 | Cancelar una orden que no está en NEW                                                          | 409  | `ORDER_NOT_CANCELLABLE`                                     |
 | Demasiados requests                                                                            | 429  | `RATE_LIMITED` (+ `Retry-After`)                            |
+| Candado de la cuenta no obtenido en 5 s / sentencia de más de 10 s                             | 503  | `LEDGER_BUSY` (seguro de reintentar)                        |
 
 ### Formato de error (RFC 7807)
 
@@ -143,8 +147,39 @@ Todo se deriva del ledger de `orders`; no se guarda ningún saldo.
 - **Posiciones**: se reproducen los trades FILLED BUY/SELL en orden con costo promedio ponderado. `marketValue = quantity × último close`, `totalReturnPct = (marketValue − costBasis) / costBasis`, `dailyReturnPct = (close − previousClose) / previousClose` ([ADR-007](docs/DECISIONS.es.md#adr-007-costo-promedio-ponderado-y-rendimientos)).
 - **Tamaño.** `size` o `amount` (nunca ambos); `size = floor(amount / precio)` con el último close para MARKET y el precio límite para LIMIT. Sin fracciones de acción.
 - **Ciclo de vida.** MARKET → `FILLED` al último close. LIMIT → `NEW`. Solo `NEW` se puede cancelar → `CANCELLED`. Efectivo/acciones insuficientes → `REJECTED` (persistida).
-- **Concurrencia.** El envío y la cancelación de órdenes de un usuario se serializan con un candado de fila dentro de una transacción, así las órdenes concurrentes nunca pueden sobregirar efectivo ni acciones ([ADR-010](docs/DECISIONS.es.md#adr-010-concurrencia-candado-por-usuario-en-lugar-de-serializable)).
+- **Transferencias.** Los depósitos y retiros son órdenes con side `CASH_IN` / `CASH_OUT` sobre `ARS`, como en el dataset, pero solo a través de los endpoints `/cash`: `POST /orders` rechaza esos sides (400) y el instrumento `ARS` (422). Un retiro mayor al efectivo disponible se persiste como `REJECTED` ([ADR-017](docs/DECISIONS.es.md#adr-017-las-transferencias-son-órdenes-con-side-cash_in--cash_out-a-través-de-sus-propios-endpoints)).
+- **Concurrencia.** El envío, la cancelación y los movimientos de efectivo de un usuario se serializan con un candado de fila dentro de una transacción `READ COMMITTED`, así las operaciones concurrentes nunca pueden sobregirar efectivo ni acciones, compitan entre órdenes, retiros o ambos ([ADR-010](docs/DECISIONS.es.md#adr-010-concurrencia-candado-por-usuario-en-lugar-de-serializable)).
 - **Rarezas de datos contempladas.** Las posiciones negativas o sobrevendidas (el seed vende más BMA de lo que compró) se excluyen de las tenencias y se informan en `warnings[]`; los instrumentos sin market data tienen precio `null` y no se pueden comprar a mercado.
+
+### Ciclo de vida de una orden y qué mueve cada transición
+
+Toda fila de `orders` entra en uno de tres estados y después existe una sola transición. Nada pasa nunca de `NEW` a `FILLED`: no hay motor de matching, como pide el enunciado.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> FILLED: MARKET BUY / SELL dentro del efectivo / acciones disponibles
+    [*] --> FILLED: CASH_IN, o CASH_OUT dentro del efectivo disponible
+    [*] --> NEW: LIMIT BUY / SELL dentro del efectivo / acciones disponibles
+    [*] --> REJECTED: BUY, SELL o CASH_OUT por encima del disponible (persistida, igual 201)
+    NEW --> CANCELLED: POST /orders/:id/cancel (libera la reserva)
+    FILLED --> [*]
+    REJECTED --> [*]
+    CANCELLED --> [*]
+```
+
+| Fila                    | `cash.total`   | `cash.reserved` | `quantity` de la posición | `reservedQuantity` de la posición |
+| ----------------------- | -------------- | --------------- | ------------------------- | --------------------------------- |
+| `FILLED` BUY            | − size × price |                 | + size                    |                                   |
+| `FILLED` SELL           | + size × price |                 | − size                    |                                   |
+| `FILLED` CASH_IN        | + monto        |                 |                           |                                   |
+| `FILLED` CASH_OUT       | − monto        |                 |                           |                                   |
+| `NEW` LIMIT BUY         |                | + size × price  |                           |                                   |
+| `NEW` LIMIT SELL        |                |                 |                           | + size                            |
+| `REJECTED` (cualquiera) |                |                 |                           |                                   |
+| `NEW` → `CANCELLED`     |                | − size × price  |                           | − size                            |
+
+`cash.available = total − reserved` y `availableQuantity = quantity − reservedQuantity` son lo que lee cada chequeo de suficiencia, siempre bajo el candado por usuario. `FILLED`, `REJECTED` y `CANCELLED` son terminales: cancelar cualquiera de ellas es un `409 ORDER_NOT_CANCELLABLE`.
 
 ## Arquitectura
 
@@ -153,7 +188,7 @@ flowchart LR
   C[Cliente] -->|HTTP /api/v1| M[Middleware<br/>metrics · helmet · cors · pino]
   M --> G[Guards<br/>throttler · user exists]
   G --> V[ValidationPipe<br/>DTOs class-validator]
-  V --> IC[InstrumentsController] & PC[PortfolioController] & OC[OrdersController]
+  V --> IC[InstrumentsController] & PC[PortfolioController] & OC[OrdersController] & CC[CashController]
   IC --> IS[InstrumentsService] --> IR[(InstrumentsRepository)]
   IS --> MS[MarketdataService] --> MR[(MarketdataRepository)]
   PC --> PS[PortfolioService] --> PR[(PortfolioRepository<br/>agregados del ledger)]
@@ -161,17 +196,21 @@ flowchart LR
   PS --> PCALC[position-calculator<br/>puro]
   OC --> OS[OrdersService] --> OR[(OrdersRepository)]
   OS --> PR
-  OS --> UR[(UsersRepository<br/>candado FOR UPDATE)]
+  OS --> UR[(UsersRepository<br/>withLock: FOR UPDATE + timeouts)]
   OS --> DEC[decideOrder<br/>puro]
+  CC --> CS[CashService] --> OR
+  CS --> PR
+  CS --> UR
+  CS --> CDEC[decideCashMovement<br/>puro]
   IR & MR & PR & OR & UR --> DB[(Postgres 16)]
   X[ProblemDetailsFilter] -.->|problem+json| C
-  OS --> MET[MetricsService] -.-> PROM[Prometheus] -.-> GRAF[Grafana]
+  OS & CS --> MET[MetricsService] -.-> PROM[Prometheus] -.-> GRAF[Grafana]
 ```
 
-- **Monolito modular en NestJS 11**, TypeScript strict. Los controladores traducen HTTP; los servicios contienen los casos de uso; los repositorios son las únicas clases que tocan **Sequelize** (modelos para CRUD, SQL crudo con bind parameters para los agregados del ledger).
+- **Monolito modular en NestJS 11**, TypeScript strict. Los controladores traducen HTTP; los servicios contienen los casos de uso; los repositorios son las únicas clases que tocan **Sequelize** (modelos para lecturas y escrituras simples, SQL crudo con bind parameters para los agregados del ledger).
 - **El dinero** nunca es un float: `NUMERIC` sigue siendo string hasta la clase `Money` (decimal.js); las respuestas llevan strings de dos decimales. Los timestamps se guardan y leen en UTC.
-- **Esquema**: el DDL provisto como migración base, luego constraints, únicos, índices (incluido `pg_trgm` para la búsqueda) y la columna `rejection_reason`, aplicados con `umzug` al arrancar el contenedor ([ADR-003](docs/DECISIONS.es.md#adr-003-migraciones-con-umzug-y-endurecimiento-del-esquema)).
-- **Endurecimiento**: entorno validado con zod (falla rápido), helmet, lista de orígenes CORS, rate limiting por IP (más estricto para el envío de órdenes), ids de request, logs JSON estructurados, health checks con Terminus, apagado graceful, contenedor sin root con `HEALTHCHECK`.
+- **Esquema**: el DDL provisto (las definiciones SQL de tablas de `database.sql`) como migración base, luego constraints, únicos, índices (incluido `pg_trgm` para la búsqueda) y la columna `rejection_reason`, aplicados con `umzug` al arrancar el contenedor ([ADR-003](docs/DECISIONS.es.md#adr-003-migraciones-con-umzug-y-endurecimiento-del-esquema)).
+- **Endurecimiento**: entorno validado con zod (falla rápido), cabeceras de seguridad con helmet, lista de orígenes CORS (acceso entre dominios), rate limiting por IP (más estricto para el envío de órdenes), ids de request, logs JSON estructurados, health checks con Terminus, apagado graceful, contenedor sin root con `HEALTHCHECK`.
 
 ### Envío de una orden, paso a paso
 
@@ -237,28 +276,30 @@ Scripts útiles (también envueltos en el `Makefile`, corré `make help`):
 
 Todas las variables se validan al arrancar (`src/config/env.schema.ts`); un valor inválido detiene el proceso con un mensaje claro. `.env` se carga si existe y nunca pisa variables de entorno reales.
 
-| Variable                  | Default       | Descripción                                                                   |
-| ------------------------- | ------------- | ----------------------------------------------------------------------------- |
-| `NODE_ENV`                | `development` | `development` activa logs legibles; `production` / `test` emiten JSON         |
-| `PORT`                    | `3000`        | Puerto HTTP                                                                   |
-| `LOG_LEVEL`               | `info`        | Nivel de pino (`silent` en tests)                                             |
-| `DATABASE_URL`            | obligatoria   | `postgres://user:pass@host:5432/db`                                           |
-| `DB_POOL_MAX`             | `10`          | Tamaño del pool de Sequelize                                                  |
-| `RUN_SEED`                | `true`        | El entrypoint del contenedor carga el dataset del challenge después de migrar |
-| `CORS_ORIGINS`            | `*`           | Lista separada por comas, o `*`                                               |
-| `RATE_LIMIT_ENABLED`      | `true`        | Throttling por IP (desactivar para pruebas de carga)                          |
-| `RATE_LIMIT_TTL_SECONDS`  | `60`          | Ventana de throttling                                                         |
-| `RATE_LIMIT_LIMIT`        | `100`         | Requests por ventana por IP                                                   |
-| `RATE_LIMIT_ORDERS_LIMIT` | `20`          | Envíos/cancelaciones de órdenes por ventana por IP                            |
-| `METRICS_ENABLED`         | `true`        | Expone `/metrics`                                                             |
+| Variable                  | Default       | Descripción                                                                           |
+| ------------------------- | ------------- | ------------------------------------------------------------------------------------- |
+| `NODE_ENV`                | `development` | `development` activa logs legibles; `production` / `test` emiten JSON                 |
+| `PORT`                    | `3000`        | Puerto HTTP                                                                           |
+| `LOG_LEVEL`               | `info`        | Nivel de pino (`silent` en tests)                                                     |
+| `DATABASE_URL`            | obligatoria   | `postgres://user:pass@host:5432/db`                                                   |
+| `DB_POOL_MAX`             | `10`          | Tamaño del pool de Sequelize                                                          |
+| `RUN_SEED`                | `true`        | El entrypoint del contenedor carga el dataset del challenge después de migrar         |
+| `CORS_ORIGINS`            | `*`           | Lista separada por comas, o `*`                                                       |
+| `RATE_LIMIT_ENABLED`      | `true`        | Throttling por IP (desactivar para pruebas de carga)                                  |
+| `RATE_LIMIT_TTL_SECONDS`  | `60`          | Ventana de throttling                                                                 |
+| `RATE_LIMIT_LIMIT`        | `100`         | Requests por ventana por IP                                                           |
+| `RATE_LIMIT_ORDERS_LIMIT` | `20`          | Mutaciones del ledger (órdenes, cancelaciones, depósitos, retiros) por ventana por IP |
+| `METRICS_ENABLED`         | `true`        | Expone `/metrics`                                                                     |
 
 ## Testing
 
-| Capa                                           | Herramienta                           | Qué demuestra                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ---------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Unitarios (`src/**/*.spec.ts`)                 | Jest                                  | Lógica de dominio pura: `Money`, replay de posiciones y costo promedio, regla de decisión de órdenes, validadores, servicios con repositorios simulados                                                                                                                                                                                                                                                                                                     |
-| Integración (`test/integration/*.e2e-spec.ts`) | Jest + Supertest + **Testcontainers** | El pipeline HTTP real contra un Postgres 16 descartable con las migraciones y el seed reales. Incluye el **test funcional del envío de órdenes** exigido por el enunciado (27 escenarios: fills, reservas, rechazos persistidos como `REJECTED`, cada camino de validación, cancelación, paginación y dos tests de **concurrencia** que prueban que no hay sobregiro), el portafolio comparado literalmente contra el seed, búsqueda y endpoints operativos |
-| Carga / corrección                             | k6                                    | Smoke, carga en rampa con umbrales de latencia, y una ráfaga de 50 VUs comprando a la vez que verifica que la cuenta nunca queda en negativo                                                                                                                                                                                                                                                                                                                |
+Las instrucciones paso a paso de cada capa, con lo que necesita cada una, están en [`docs/TESTING.md`](docs/TESTING.md) (en inglés).
+
+| Capa                                           | Herramienta                           | Qué demuestra                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ---------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unitarios (`src/**/*.spec.ts`)                 | Jest                                  | Lógica de dominio pura: `Money`, replay de posiciones y costo promedio, regla de decisión de órdenes, validadores, servicios con repositorios simulados                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Integración (`test/integration/*.e2e-spec.ts`) | Jest + Supertest + **Testcontainers** | El pipeline HTTP real contra un Postgres 16 descartable con las migraciones y el seed reales. Incluye el **test funcional del envío de órdenes** exigido por el enunciado (53 casos de prueba: fills, reservas, rechazos persistidos como `REJECTED`, cada camino de validación, cancelación, paginación y dos tests de **concurrencia** que prueban que no hay sobregiro), **18 escenarios de efectivo** (depósitos, retiros contra el disponible, rechazos persistidos, sides de efectivo rechazados en el endpoint de órdenes, retiros concurrentes y retiros compitiendo con compras), el portafolio comparado literalmente contra el seed, búsqueda y endpoints operativos |
+| Carga / corrección                             | k6                                    | Smoke, carga en rampa con umbrales de latencia, y una ráfaga de 50 usuarios virtuales (VUs) comprando a la vez que verifica que la cuenta nunca queda en negativo                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 ```bash
 npm test               # ~10 s
@@ -266,7 +307,7 @@ npm run test:e2e       # ~30 s, necesita Docker (levanta postgres:16-alpine)
 npm run test:cov       # ambos proyectos, cobertura combinada -> coverage/lcov-report/index.html
 ```
 
-Los umbrales de cobertura se aplican (85 % de sentencias / funciones / líneas, 80 % de ramas); la última corrida local reportó ~96 % de sentencias y ~85 % de ramas sobre `src/` excluyendo DTOs, modelos, migraciones y bootstrap.
+Los umbrales de cobertura se aplican (85 % de sentencias / funciones / líneas, 80 % de ramas); la última corrida local reportó ~97 % de sentencias y ~88 % de ramas sobre `src/` excluyendo DTOs, modelos, migraciones y bootstrap.
 
 ## Pruebas de carga y concurrencia (k6)
 
@@ -274,7 +315,7 @@ Los scripts de [k6](https://k6.io) viven en `k6/`. Apuntalos a cualquier desplie
 
 | Script                   | Escenario                                                                                       | Umbrales                                                                                                                     |
 | ------------------------ | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `npm run k6:smoke`       | 1 VU, 30 s: health, búsqueda, portafolio, LIMIT + cancelación                                   | `http_req_failed < 1%`, `p(95) < 300 ms`, checks > 99%                                                                       |
+| `npm run k6:smoke`       | 1 VU, 30 s: health, búsqueda, portafolio, LIMIT + cancelación, depósito + retiro                | `http_req_failed < 1%`, `p(95) < 300 ms`, checks > 99%                                                                       |
 | `npm run k6:load`        | Rampa 0→20→50→0 VUs en 2 min; 50% búsqueda, 30% portafolio, 15% LIMIT+cancel, 5% compras MARKET | GET `p(95) < 200 ms`, POST `p(95) < 400 ms`, `http_req_failed < 1%`, sin iteraciones descartadas                             |
 | `npm run k6:concurrency` | Siembra al usuario 2 con 1.000.000 ARS y luego **50 VUs disparan la misma MARKET BUY a la vez** | Exactamente ⌊disponible / nocional⌋ órdenes `FILLED`, el resto `REJECTED`, efectivo nunca negativo, contabilidad consistente |
 
@@ -292,13 +333,13 @@ Métricas expuestas en `/metrics` (**plantillas** de ruta, cardinalidad acotada)
 
 - Histograma `http_server_request_duration_seconds{method,route,status_code}`, `http_server_requests_in_flight`
 - `orders_placed_total{status,side,type}`, `orders_rejected_total{reason}`, `orders_cancelled_total`
-- `db_pool_connections{state}` y las métricas por defecto del proceso Node.js (lag del event loop, heap, CPU, GC)
+- `db_pool_connections{state}` y las métricas por defecto del proceso Node.js (lag del event loop, heap, CPU, recolección de basura)
 
 ![Dashboard de Grafana "Cocos API" tras una corrida de carga con k6: tasa de requests y latencia p95, órdenes ejecutadas y rechazadas en la última hora, tasa por ruta y percentiles de latencia](docs/grafana-dashboard.png)
 
 El dashboard (`docker/grafana/provisioning/dashboards/cocos-api.json`) muestra tasa de requests por ruta, percentiles de latencia, clases de respuesta, resultados de órdenes y motivos de rechazo, uso del pool y salud del runtime.
 
-Los logs son JSON (pino) con `req.id`; los scrapes de health y métricas no se loguean. Las anomalías del portafolio (posiciones negativas, precios faltantes) se loguean en `warn` con el id del usuario.
+Los logs son JSON (pino) con `req.id`; los scrapes de health y métricas no se loguean. Toda operación que mueve efectivo o acciones (enviar, cancelar, depositar, retirar) deja un rastro estructurado con `operation`, `userId` y los campos de negocio: `debug` al recibirla y de nuevo al decidirla bajo el candado (saldos leídos, decisión, espera del candado), `info` en fills y transferencias liquidadas, `warn` en todo resultado `REJECTED`, `debug` en los rechazos esperados (404/409/422 con su `code`) y `error` con el stack y el contexto completo cuando la transacción falla. Las anomalías del portafolio (posiciones negativas, precios faltantes) se loguean en `warn`. Con `LOG_LEVEL=debug` se ve el rastro completo.
 
 ## CI
 
@@ -317,16 +358,17 @@ Dependabot mantiene al día npm, GitHub Actions y la imagen base.
 src/
   main.ts, app.module.ts, app.setup.ts     # bootstrap y pipeline HTTP compartido (también lo usan los tests)
   config/                                  # esquema zod del entorno + AppConfig tipado
-  common/                                  # errores, filtro problem+json, Money, cursor de paginación, validadores, throttling
-  database/                                # módulo Sequelize, modelos, migraciones y seeders umzug, CLI, parsers de tipos pg
+  common/                                  # constantes y códigos de error compartidos, errores + filtro problem+json, Money, cursor de paginación, validadores, throttling, logging de operaciones
+  database/                                # módulo Sequelize, modelos, migraciones y seeders umzug, herramienta de línea de comandos, parsers de tipos pg
   health/                                  # liveness / readiness con Terminus
   observability/                           # módulo de logging pino, módulo de métricas Prometheus
   modules/
     instruments/                           # búsqueda + detalle, con últimos precios
     marketdata/                            # último close / previous close por instrumento
     portfolio/                             # agregados del ledger, calculadora pura de posiciones, valuación
-    orders/                                # envío / cancelación / listado, regla de decisión, candado por usuario
-    users/                                 # lookup de usuario, UserExistsGuard, candado de fila
+    orders/                                # envío / cancelación / listado, regla de decisión
+    cash/                                  # depósitos (CASH_IN) / retiros (CASH_OUT), regla de decisión
+    users/                                 # lookup de usuario, UserExistsGuard, candado de fila por usuario (withLock)
 test/
   setup/                                   # setup / teardown global de Testcontainers
   helpers/                                 # fábrica de app de test, reset de la base al seed

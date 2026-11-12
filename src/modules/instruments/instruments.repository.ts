@@ -38,13 +38,16 @@ export function toLikePattern(term: string): string {
  * given, then ticker for a stable order. `count(*) OVER ()` returns the total
  * in the same round trip.
  */
-const SEARCH_SQL = `
-  SELECT id, ticker, name, type, count(*) OVER () AS total
-    FROM instruments
+const SEARCH_WHERE = `
    WHERE type <> 'MONEDA'
      AND ($q::text IS NULL OR ticker ILIKE $qLike::text ESCAPE '${LIKE_ESCAPE}' OR name ILIKE $qLike::text ESCAPE '${LIKE_ESCAPE}')
      AND ($ticker::text IS NULL OR ticker ILIKE $tickerLike::text ESCAPE '${LIKE_ESCAPE}')
-     AND ($name::text IS NULL OR name ILIKE $nameLike::text ESCAPE '${LIKE_ESCAPE}')
+     AND ($name::text IS NULL OR name ILIKE $nameLike::text ESCAPE '${LIKE_ESCAPE}')`;
+
+const SEARCH_SQL = `
+  SELECT id, ticker, name, type, count(*) OVER () AS total
+    FROM instruments
+   ${SEARCH_WHERE}
    ORDER BY
      CASE WHEN $q::text IS NULL THEN 0
           ELSE GREATEST(similarity(ticker, $q::text), similarity(name, $q::text)) END DESC,
@@ -61,24 +64,34 @@ export class InstrumentsRepository {
   ) {}
 
   async search(params: InstrumentSearch): Promise<InstrumentSearchResult> {
+    const filters = {
+      q: params.q ?? null,
+      qLike: params.q ? toLikePattern(params.q) : null,
+      ticker: params.ticker ?? null,
+      tickerLike: params.ticker ? toLikePattern(params.ticker) : null,
+      name: params.name ?? null,
+      nameLike: params.name ? toLikePattern(params.name) : null,
+    };
+    const offset = (params.page - 1) * params.limit;
     const rows = await this.sequelize.query<SearchRow>(SEARCH_SQL, {
       type: QueryTypes.SELECT,
-      bind: {
-        q: params.q ?? null,
-        qLike: params.q ? toLikePattern(params.q) : null,
-        ticker: params.ticker ?? null,
-        tickerLike: params.ticker ? toLikePattern(params.ticker) : null,
-        name: params.name ?? null,
-        nameLike: params.name ? toLikePattern(params.name) : null,
-        limit: params.limit,
-        offset: (params.page - 1) * params.limit,
-      },
+      bind: { ...filters, limit: params.limit, offset },
     });
-    const total = rows.length > 0 ? Number(rows[0]?.total ?? 0) : 0;
+    // The window count only travels with returned rows; past the last page ask for it explicitly.
+    const total =
+      rows.length > 0 ? Number(rows[0]?.total ?? 0) : offset > 0 ? await this.count(filters) : 0;
     return {
       rows: rows.map(({ id, ticker, name, type }) => ({ id, ticker, name, type })),
       total,
     };
+  }
+
+  private async count(filters: Record<string, string | null>): Promise<number> {
+    const [row] = await this.sequelize.query<{ total: string | number }>(
+      `SELECT count(*) AS total FROM instruments ${SEARCH_WHERE}`,
+      { type: QueryTypes.SELECT, bind: filters },
+    );
+    return Number(row?.total ?? 0);
   }
 
   async findById(id: number, transaction?: Transaction): Promise<InstrumentRecord | null> {
