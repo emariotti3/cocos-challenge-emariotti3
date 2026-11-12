@@ -133,7 +133,7 @@ RFC 7807 ("Problem Details for HTTP APIs") is the internet standard that defines
 ## ADR-015 Testing strategy
 
 - **Unit** (Jest): pure domain functions (`Money`, position replay, order decision, validators) and services with mocked repositories.
-- **Integration** (Jest + Supertest + Testcontainers): the real HTTP pipeline against a disposable Postgres 16 with the real migrations and seed; covers the challenge-mandated functional test of order placement (27 scenarios including concurrency), portfolio totals (asserted verbatim against the seed), search, health and error shapes. The `orders` table is restored to the seed between tests.
+- **Integration** (Jest + Supertest + Testcontainers): the real HTTP pipeline against a disposable Postgres 16 with the real migrations and seed; covers the challenge-mandated functional test of order placement (53 test cases including concurrency), portfolio totals (asserted verbatim against the seed), search, health and error shapes. The `orders` table is restored to the seed between tests.
 - **Load / correctness** (k6): `smoke`, `load` (ramping to 50 virtual users (VUs) with thresholds) and `concurrency` (50 simultaneous buys against a seeded account; asserts no overdraft). Thresholds are regression guards calibrated for a laptop, not SLOs.
 - **Coverage**: unit and integration projects run together; continuous integration (CI) fails below 85% statements/functions/lines and 80% branches.
 

@@ -18,15 +18,16 @@ Hay además una [página de resumen](https://claude.ai/artifact/U3Qu9VvY3gs7DziB
 
 Si tenés diez minutos, estos archivos concentran la mayor parte del diseño:
 
-| Qué                                                              | Dónde                                                                                                                |
-| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| El test funcional del envío de órdenes que pide el enunciado     | [`test/integration/orders.e2e-spec.ts`](test/integration/orders.e2e-spec.ts) (pipeline HTTP real, Postgres real)     |
-| La regla de aceptación del mercado, como función pura            | [`src/modules/orders/domain/order-decision.ts`](src/modules/orders/domain/order-decision.ts)                         |
-| Efectivo, reservas y disponibilidad derivados del ledger         | [`src/modules/portfolio/portfolio.repository.ts`](src/modules/portfolio/portfolio.repository.ts)                     |
-| Replay de posiciones con costo promedio ponderado                | [`src/modules/portfolio/domain/position-calculator.ts`](src/modules/portfolio/domain/position-calculator.ts)         |
-| El candado por usuario que hace seguras las órdenes concurrentes | [`src/modules/users/users.repository.ts`](src/modules/users/users.repository.ts)                                     |
-| Cada cambio del esquema y su justificación                       | [`src/database/migrations/0002_constraints_and_indexes.ts`](src/database/migrations/0002_constraints_and_indexes.ts) |
-| Cada supuesto, con las alternativas descartadas                  | [`docs/DECISIONS.es.md`](docs/DECISIONS.es.md)                                                                       |
+| Qué                                                                                     | Dónde                                                                                                                                             |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| El test funcional del envío de órdenes que pide el enunciado                            | [`test/integration/orders.e2e-spec.ts`](test/integration/orders.e2e-spec.ts) (pipeline HTTP real, Postgres real)                                  |
+| La regla de aceptación del mercado, como función pura                                   | [`src/modules/orders/domain/order-decision.ts`](src/modules/orders/domain/order-decision.ts)                                                      |
+| Efectivo, reservas y disponibilidad derivados del ledger                                | [`src/modules/portfolio/portfolio.repository.ts`](src/modules/portfolio/portfolio.repository.ts)                                                  |
+| Replay de posiciones con costo promedio ponderado                                       | [`src/modules/portfolio/domain/position-calculator.ts`](src/modules/portfolio/domain/position-calculator.ts)                                      |
+| Depósitos y retiros como órdenes `CASH_IN` / `CASH_OUT`                                 | [`src/modules/cash/cash.service.ts`](src/modules/cash/cash.service.ts) y [`test/integration/cash.e2e-spec.ts`](test/integration/cash.e2e-spec.ts) |
+| El candado por usuario (`withLock`) que hace seguras las órdenes y retiros concurrentes | [`src/modules/users/users.repository.ts`](src/modules/users/users.repository.ts)                                                                  |
+| Cada cambio del esquema y su justificación                                              | [`src/database/migrations/0002_constraints_and_indexes.ts`](src/database/migrations/0002_constraints_and_indexes.ts)                              |
+| Cada supuesto, con las alternativas descartadas                                         | [`docs/DECISIONS.es.md`](docs/DECISIONS.es.md)                                                                                                    |
 
 ## Contenido
 
@@ -187,7 +188,7 @@ flowchart LR
   C[Cliente] -->|HTTP /api/v1| M[Middleware<br/>metrics · helmet · cors · pino]
   M --> G[Guards<br/>throttler · user exists]
   G --> V[ValidationPipe<br/>DTOs class-validator]
-  V --> IC[InstrumentsController] & PC[PortfolioController] & OC[OrdersController]
+  V --> IC[InstrumentsController] & PC[PortfolioController] & OC[OrdersController] & CC[CashController]
   IC --> IS[InstrumentsService] --> IR[(InstrumentsRepository)]
   IS --> MS[MarketdataService] --> MR[(MarketdataRepository)]
   PC --> PS[PortfolioService] --> PR[(PortfolioRepository<br/>agregados del ledger)]
@@ -195,11 +196,15 @@ flowchart LR
   PS --> PCALC[position-calculator<br/>puro]
   OC --> OS[OrdersService] --> OR[(OrdersRepository)]
   OS --> PR
-  OS --> UR[(UsersRepository<br/>candado FOR UPDATE)]
+  OS --> UR[(UsersRepository<br/>withLock: FOR UPDATE + timeouts)]
   OS --> DEC[decideOrder<br/>puro]
+  CC --> CS[CashService] --> OR
+  CS --> PR
+  CS --> UR
+  CS --> CDEC[decideCashMovement<br/>puro]
   IR & MR & PR & OR & UR --> DB[(Postgres 16)]
   X[ProblemDetailsFilter] -.->|problem+json| C
-  OS --> MET[MetricsService] -.-> PROM[Prometheus] -.-> GRAF[Grafana]
+  OS & CS --> MET[MetricsService] -.-> PROM[Prometheus] -.-> GRAF[Grafana]
 ```
 
 - **Monolito modular en NestJS 11**, TypeScript strict. Los controladores traducen HTTP; los servicios contienen los casos de uso; los repositorios son las únicas clases que tocan **Sequelize** (modelos para lecturas y escrituras simples, SQL crudo con bind parameters para los agregados del ledger).
@@ -290,11 +295,11 @@ Todas las variables se validan al arrancar (`src/config/env.schema.ts`); un valo
 
 Las instrucciones paso a paso de cada capa, con lo que necesita cada una, están en [`docs/TESTING.md`](docs/TESTING.md) (en inglés).
 
-| Capa                                           | Herramienta                           | Qué demuestra                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| ---------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Unitarios (`src/**/*.spec.ts`)                 | Jest                                  | Lógica de dominio pura: `Money`, replay de posiciones y costo promedio, regla de decisión de órdenes, validadores, servicios con repositorios simulados                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| Integración (`test/integration/*.e2e-spec.ts`) | Jest + Supertest + **Testcontainers** | El pipeline HTTP real contra un Postgres 16 descartable con las migraciones y el seed reales. Incluye el **test funcional del envío de órdenes** exigido por el enunciado (27 escenarios: fills, reservas, rechazos persistidos como `REJECTED`, cada camino de validación, cancelación, paginación y dos tests de **concurrencia** que prueban que no hay sobregiro), **18 escenarios de efectivo** (depósitos, retiros contra el disponible, rechazos persistidos, sides de efectivo rechazados en el endpoint de órdenes, retiros concurrentes y retiros compitiendo con compras), el portafolio comparado literalmente contra el seed, búsqueda y endpoints operativos |
-| Carga / corrección                             | k6                                    | Smoke, carga en rampa con umbrales de latencia, y una ráfaga de 50 usuarios virtuales (VUs) comprando a la vez que verifica que la cuenta nunca queda en negativo                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Capa                                           | Herramienta                           | Qué demuestra                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ---------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unitarios (`src/**/*.spec.ts`)                 | Jest                                  | Lógica de dominio pura: `Money`, replay de posiciones y costo promedio, regla de decisión de órdenes, validadores, servicios con repositorios simulados                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Integración (`test/integration/*.e2e-spec.ts`) | Jest + Supertest + **Testcontainers** | El pipeline HTTP real contra un Postgres 16 descartable con las migraciones y el seed reales. Incluye el **test funcional del envío de órdenes** exigido por el enunciado (53 casos de prueba: fills, reservas, rechazos persistidos como `REJECTED`, cada camino de validación, cancelación, paginación y dos tests de **concurrencia** que prueban que no hay sobregiro), **18 escenarios de efectivo** (depósitos, retiros contra el disponible, rechazos persistidos, sides de efectivo rechazados en el endpoint de órdenes, retiros concurrentes y retiros compitiendo con compras), el portafolio comparado literalmente contra el seed, búsqueda y endpoints operativos |
+| Carga / corrección                             | k6                                    | Smoke, carga en rampa con umbrales de latencia, y una ráfaga de 50 usuarios virtuales (VUs) comprando a la vez que verifica que la cuenta nunca queda en negativo                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 ```bash
 npm test               # ~10 s
@@ -302,7 +307,7 @@ npm run test:e2e       # ~30 s, necesita Docker (levanta postgres:16-alpine)
 npm run test:cov       # ambos proyectos, cobertura combinada -> coverage/lcov-report/index.html
 ```
 
-Los umbrales de cobertura se aplican (85 % de sentencias / funciones / líneas, 80 % de ramas); la última corrida local reportó ~97 % de sentencias y ~86 % de ramas sobre `src/` excluyendo DTOs, modelos, migraciones y bootstrap.
+Los umbrales de cobertura se aplican (85 % de sentencias / funciones / líneas, 80 % de ramas); la última corrida local reportó ~97 % de sentencias y ~88 % de ramas sobre `src/` excluyendo DTOs, modelos, migraciones y bootstrap.
 
 ## Pruebas de carga y concurrencia (k6)
 
@@ -310,7 +315,7 @@ Los scripts de [k6](https://k6.io) viven en `k6/`. Apuntalos a cualquier desplie
 
 | Script                   | Escenario                                                                                       | Umbrales                                                                                                                     |
 | ------------------------ | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `npm run k6:smoke`       | 1 VU, 30 s: health, búsqueda, portafolio, LIMIT + cancelación                                   | `http_req_failed < 1%`, `p(95) < 300 ms`, checks > 99%                                                                       |
+| `npm run k6:smoke`       | 1 VU, 30 s: health, búsqueda, portafolio, LIMIT + cancelación, depósito + retiro                | `http_req_failed < 1%`, `p(95) < 300 ms`, checks > 99%                                                                       |
 | `npm run k6:load`        | Rampa 0→20→50→0 VUs en 2 min; 50% búsqueda, 30% portafolio, 15% LIMIT+cancel, 5% compras MARKET | GET `p(95) < 200 ms`, POST `p(95) < 400 ms`, `http_req_failed < 1%`, sin iteraciones descartadas                             |
 | `npm run k6:concurrency` | Siembra al usuario 2 con 1.000.000 ARS y luego **50 VUs disparan la misma MARKET BUY a la vez** | Exactamente ⌊disponible / nocional⌋ órdenes `FILLED`, el resto `REJECTED`, efectivo nunca negativo, contabilidad consistente |
 
@@ -353,7 +358,7 @@ Dependabot mantiene al día npm, GitHub Actions y la imagen base.
 src/
   main.ts, app.module.ts, app.setup.ts     # bootstrap y pipeline HTTP compartido (también lo usan los tests)
   config/                                  # esquema zod del entorno + AppConfig tipado
-  common/                                  # errores, filtro problem+json, Money, cursor de paginación, validadores, throttling, logging de operaciones
+  common/                                  # constantes y códigos de error compartidos, errores + filtro problem+json, Money, cursor de paginación, validadores, throttling, logging de operaciones
   database/                                # módulo Sequelize, modelos, migraciones y seeders umzug, herramienta de línea de comandos, parsers de tipos pg
   health/                                  # liveness / readiness con Terminus
   observability/                           # módulo de logging pino, módulo de métricas Prometheus

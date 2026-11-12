@@ -18,15 +18,16 @@ There is also an [overview page](https://claude.ai/artifact/U3Qu9VvY3gs7DziB4Ecf
 
 If you have ten minutes, these files carry most of the design:
 
-| What                                                          | Where                                                                                                                |
-| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| The functional test of order placement the challenge asks for | [`test/integration/orders.e2e-spec.ts`](test/integration/orders.e2e-spec.ts) (real HTTP pipeline, real Postgres)     |
-| The market acceptance rule, as a pure function                | [`src/modules/orders/domain/order-decision.ts`](src/modules/orders/domain/order-decision.ts)                         |
-| Cash, reservations and availability derived from the ledger   | [`src/modules/portfolio/portfolio.repository.ts`](src/modules/portfolio/portfolio.repository.ts)                     |
-| Position replay with weighted average cost                    | [`src/modules/portfolio/domain/position-calculator.ts`](src/modules/portfolio/domain/position-calculator.ts)         |
-| The per-user lock that makes concurrent orders safe           | [`src/modules/users/users.repository.ts`](src/modules/users/users.repository.ts)                                     |
-| Every schema change and why                                   | [`src/database/migrations/0002_constraints_and_indexes.ts`](src/database/migrations/0002_constraints_and_indexes.ts) |
-| Every assumption, with the alternatives rejected              | [`docs/DECISIONS.md`](docs/DECISIONS.md)                                                                             |
+| What                                                                             | Where                                                                                                                                               |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The functional test of order placement the challenge asks for                    | [`test/integration/orders.e2e-spec.ts`](test/integration/orders.e2e-spec.ts) (real HTTP pipeline, real Postgres)                                    |
+| The market acceptance rule, as a pure function                                   | [`src/modules/orders/domain/order-decision.ts`](src/modules/orders/domain/order-decision.ts)                                                        |
+| Cash, reservations and availability derived from the ledger                      | [`src/modules/portfolio/portfolio.repository.ts`](src/modules/portfolio/portfolio.repository.ts)                                                    |
+| Position replay with weighted average cost                                       | [`src/modules/portfolio/domain/position-calculator.ts`](src/modules/portfolio/domain/position-calculator.ts)                                        |
+| Cash deposits and withdrawals as `CASH_IN` / `CASH_OUT` orders                   | [`src/modules/cash/cash.service.ts`](src/modules/cash/cash.service.ts) and [`test/integration/cash.e2e-spec.ts`](test/integration/cash.e2e-spec.ts) |
+| The per-user lock (`withLock`) that makes concurrent orders and withdrawals safe | [`src/modules/users/users.repository.ts`](src/modules/users/users.repository.ts)                                                                    |
+| Every schema change and why                                                      | [`src/database/migrations/0002_constraints_and_indexes.ts`](src/database/migrations/0002_constraints_and_indexes.ts)                                |
+| Every assumption, with the alternatives rejected                                 | [`docs/DECISIONS.md`](docs/DECISIONS.md)                                                                                                            |
 
 ## Contents
 
@@ -187,7 +188,7 @@ flowchart LR
   C[Client] -->|HTTP /api/v1| M[Middleware<br/>metrics · helmet · cors · pino]
   M --> G[Guards<br/>throttler · user exists]
   G --> V[ValidationPipe<br/>class-validator DTOs]
-  V --> IC[InstrumentsController] & PC[PortfolioController] & OC[OrdersController]
+  V --> IC[InstrumentsController] & PC[PortfolioController] & OC[OrdersController] & CC[CashController]
   IC --> IS[InstrumentsService] --> IR[(InstrumentsRepository)]
   IS --> MS[MarketdataService] --> MR[(MarketdataRepository)]
   PC --> PS[PortfolioService] --> PR[(PortfolioRepository<br/>ledger aggregates)]
@@ -195,11 +196,15 @@ flowchart LR
   PS --> PCALC[position-calculator<br/>pure]
   OC --> OS[OrdersService] --> OR[(OrdersRepository)]
   OS --> PR
-  OS --> UR[(UsersRepository<br/>FOR UPDATE lock)]
+  OS --> UR[(UsersRepository<br/>withLock: FOR UPDATE + timeouts)]
   OS --> DEC[decideOrder<br/>pure]
+  CC --> CS[CashService] --> OR
+  CS --> PR
+  CS --> UR
+  CS --> CDEC[decideCashMovement<br/>pure]
   IR & MR & PR & OR & UR --> DB[(Postgres 16)]
   X[ProblemDetailsFilter] -.->|problem+json| C
-  OS --> MET[MetricsService] -.-> PROM[Prometheus] -.-> GRAF[Grafana]
+  OS & CS --> MET[MetricsService] -.-> PROM[Prometheus] -.-> GRAF[Grafana]
 ```
 
 - **NestJS 11 modular monolith**, TypeScript strict. Controllers translate HTTP; services hold use cases; repositories are the only classes that touch **Sequelize** (models for simple reads and writes, raw SQL with bind parameters for the ledger aggregates).
@@ -290,11 +295,11 @@ All variables are validated at boot (`src/config/env.schema.ts`); invalid values
 
 Step-by-step instructions for every layer, including what each one needs, are in [`docs/TESTING.md`](docs/TESTING.md).
 
-| Layer                                          | Tool                                  | What it proves                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| ---------------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Unit (`src/**/*.spec.ts`)                      | Jest                                  | Pure domain logic: `Money`, position replay and average cost, order decision rule, validators, services with mocked repositories                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Integration (`test/integration/*.e2e-spec.ts`) | Jest + Supertest + **Testcontainers** | The real HTTP pipeline against a disposable Postgres 16 with the real migrations and seed. Includes the challenge's **functional test of order placement** (27 scenarios: fills, reservations, rejections persisted as `REJECTED`, every validation path, cancellation, pagination, and two **concurrency** tests proving no overdraft), **18 cash scenarios** (deposits, withdrawals against available cash, rejections persisted, cash sides refused on the orders endpoint, concurrent withdrawals and withdrawals racing buys), the portfolio asserted verbatim against the seed, search and operational endpoints |
-| Load / correctness                             | k6                                    | Smoke, ramping load with latency thresholds, and a burst of 50 virtual users (VUs) buying simultaneously asserting the account never goes negative                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Layer                                          | Tool                                  | What it proves                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit (`src/**/*.spec.ts`)                      | Jest                                  | Pure domain logic: `Money`, position replay and average cost, order decision rule, validators, services with mocked repositories                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Integration (`test/integration/*.e2e-spec.ts`) | Jest + Supertest + **Testcontainers** | The real HTTP pipeline against a disposable Postgres 16 with the real migrations and seed. Includes the challenge's **functional test of order placement** (53 test cases: fills, reservations, rejections persisted as `REJECTED`, every validation path, cancellation, pagination, and two **concurrency** tests proving no overdraft), **18 cash scenarios** (deposits, withdrawals against available cash, rejections persisted, cash sides refused on the orders endpoint, concurrent withdrawals and withdrawals racing buys), the portfolio asserted verbatim against the seed, search and operational endpoints |
+| Load / correctness                             | k6                                    | Smoke, ramping load with latency thresholds, and a burst of 50 virtual users (VUs) buying simultaneously asserting the account never goes negative                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ```bash
 npm test               # ~10 s
@@ -302,7 +307,7 @@ npm run test:e2e       # ~30 s, needs Docker (starts postgres:16-alpine)
 npm run test:cov       # both projects, merged coverage -> coverage/lcov-report/index.html
 ```
 
-Coverage thresholds are enforced (85% statements / functions / lines, 80% branches); the last local run reported ~97% statements and ~86% branches over `src/` excluding DTOs, models, migrations and bootstrap.
+Coverage thresholds are enforced (85% statements / functions / lines, 80% branches); the last local run reported ~97% statements and ~88% branches over `src/` excluding DTOs, models, migrations and bootstrap.
 
 ## Load and concurrency tests (k6)
 
@@ -310,7 +315,7 @@ Coverage thresholds are enforced (85% statements / functions / lines, 80% branch
 
 | Script                   | Scenario                                                                                   | Thresholds                                                                                                      |
 | ------------------------ | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `npm run k6:smoke`       | 1 VU, 30 s: health, search, portfolio, LIMIT + cancel                                      | `http_req_failed < 1%`, `p(95) < 300 ms`, checks > 99%                                                          |
+| `npm run k6:smoke`       | 1 VU, 30 s: health, search, portfolio, LIMIT + cancel, deposit + withdrawal                | `http_req_failed < 1%`, `p(95) < 300 ms`, checks > 99%                                                          |
 | `npm run k6:load`        | Ramp 0→20→50→0 VUs over 2 min; 50% search, 30% portfolio, 15% LIMIT+cancel, 5% MARKET buys | GET `p(95) < 200 ms`, POST `p(95) < 400 ms`, `http_req_failed < 1%`, no dropped iterations                      |
 | `npm run k6:concurrency` | Seeds user 2 with 1,000,000 ARS, then **50 VUs fire the same MARKET BUY at once**          | Exactly ⌊available / notional⌋ orders `FILLED`, the rest `REJECTED`, cash never negative, accounting consistent |
 
@@ -353,7 +358,7 @@ Dependabot keeps npm, GitHub Actions and the base image current.
 src/
   main.ts, app.module.ts, app.setup.ts     # bootstrap and the shared HTTP pipeline (also used by tests)
   config/                                  # zod env schema + typed AppConfig
-  common/                                  # errors, problem+json filter, Money, pagination cursor, validators, throttling, operation logging
+  common/                                  # shared constants and error codes, errors + problem+json filter, Money, pagination cursor, validators, throttling, operation logging
   database/                                # Sequelize module, models, umzug migrations + seeders, command-line tool, pg type parsers
   health/                                  # Terminus liveness / readiness
   observability/                           # pino logging module, Prometheus metrics module

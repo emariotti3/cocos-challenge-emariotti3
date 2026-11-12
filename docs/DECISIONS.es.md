@@ -133,7 +133,7 @@ RFC 7807 ("Problem Details for HTTP APIs") es el estándar de internet que defin
 ## ADR-015 Estrategia de testing
 
 - **Unitarios** (Jest): funciones de dominio puras (`Money`, replay de posiciones, decisión de órdenes, validadores) y servicios con repositorios simulados.
-- **Integración** (Jest + Supertest + Testcontainers): el pipeline HTTP real contra un Postgres 16 descartable con las migraciones y el seed reales; cubre el test funcional del envío de órdenes exigido por el enunciado (27 escenarios, incluida concurrencia), los totales del portafolio (comparados literalmente contra el seed), búsqueda, health y formatos de error. La tabla `orders` se restaura al seed entre tests.
+- **Integración** (Jest + Supertest + Testcontainers): el pipeline HTTP real contra un Postgres 16 descartable con las migraciones y el seed reales; cubre el test funcional del envío de órdenes exigido por el enunciado (53 casos de prueba, incluida concurrencia), los totales del portafolio (comparados literalmente contra el seed), búsqueda, health y formatos de error. La tabla `orders` se restaura al seed entre tests.
 - **Carga / corrección** (k6): `smoke`, `load` (rampa hasta 50 usuarios virtuales (VUs) con umbrales) y `concurrency` (50 compras simultáneas contra una cuenta sembrada; verifica que no haya sobregiro). Los umbrales son guardas de regresión calibradas para una laptop, no SLOs.
 - **Cobertura**: unitarios e integración corren juntos; integración continua (CI) falla por debajo de 85 % de sentencias/funciones/líneas y 80 % de ramas.
 
