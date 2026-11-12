@@ -149,6 +149,36 @@ Todo se deriva del ledger de `orders`; no se guarda ningún saldo.
 - **Concurrencia.** El envío, la cancelación y los movimientos de efectivo de un usuario se serializan con un candado de fila dentro de una transacción `READ COMMITTED`, así las operaciones concurrentes nunca pueden sobregirar efectivo ni acciones, compitan entre órdenes, retiros o ambos ([ADR-010](docs/DECISIONS.es.md#adr-010-concurrencia-candado-por-usuario-en-lugar-de-serializable)).
 - **Rarezas de datos contempladas.** Las posiciones negativas o sobrevendidas (el seed vende más BMA de lo que compró) se excluyen de las tenencias y se informan en `warnings[]`; los instrumentos sin market data tienen precio `null` y no se pueden comprar a mercado.
 
+### Ciclo de vida de una orden y qué mueve cada transición
+
+Toda fila de `orders` entra en uno de tres estados y después existe una sola transición. Nada pasa nunca de `NEW` a `FILLED`: no hay motor de matching, como pide el enunciado.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> FILLED: MARKET BUY / SELL dentro del efectivo / acciones disponibles
+    [*] --> FILLED: CASH_IN, o CASH_OUT dentro del efectivo disponible
+    [*] --> NEW: LIMIT BUY / SELL dentro del efectivo / acciones disponibles
+    [*] --> REJECTED: BUY, SELL o CASH_OUT por encima del disponible (persistida, igual 201)
+    NEW --> CANCELLED: POST /orders/:id/cancel (libera la reserva)
+    FILLED --> [*]
+    REJECTED --> [*]
+    CANCELLED --> [*]
+```
+
+| Fila                    | `cash.total`   | `cash.reserved` | `quantity` de la posición | `reservedQuantity` de la posición |
+| ----------------------- | -------------- | --------------- | ------------------------- | --------------------------------- |
+| `FILLED` BUY            | − size × price |                 | + size                    |                                   |
+| `FILLED` SELL           | + size × price |                 | − size                    |                                   |
+| `FILLED` CASH_IN        | + monto        |                 |                           |                                   |
+| `FILLED` CASH_OUT       | − monto        |                 |                           |                                   |
+| `NEW` LIMIT BUY         |                | + size × price  |                           |                                   |
+| `NEW` LIMIT SELL        |                |                 |                           | + size                            |
+| `REJECTED` (cualquiera) |                |                 |                           |                                   |
+| `NEW` → `CANCELLED`     |                | − size × price  |                           | − size                            |
+
+`cash.available = total − reserved` y `availableQuantity = quantity − reservedQuantity` son lo que lee cada chequeo de suficiencia, siempre bajo el candado por usuario. `FILLED`, `REJECTED` y `CANCELLED` son terminales: cancelar cualquiera de ellas es un `409 ORDER_NOT_CANCELLABLE`.
+
 ## Arquitectura
 
 ```mermaid

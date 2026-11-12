@@ -149,6 +149,36 @@ Everything is derived from the `orders` ledger; no balance is stored.
 - **Concurrency.** Order placement, cancellation and cash movements for one user are serialized with a row lock inside a `READ COMMITTED` transaction, so concurrent operations can never overdraw cash or shares, whether they compete through orders, withdrawals or both ([ADR-010](docs/DECISIONS.md#adr-010-concurrency-per-user-row-lock-instead-of-serializable)).
 - **Data quirks handled.** Negative/oversold positions (the seed sells more BMA than it bought) are excluded from holdings and reported in `warnings[]`; instruments without market data get `null` prices and cannot be bought at market.
 
+### Order lifecycle and what each transition moves
+
+Every row in `orders` enters in one of three states and only one transition exists afterwards. Nothing ever moves from `NEW` to `FILLED`: there is no matching engine, as the challenge asks.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> FILLED: MARKET BUY / SELL within available cash / shares
+    [*] --> FILLED: CASH_IN, or CASH_OUT within available cash
+    [*] --> NEW: LIMIT BUY / SELL within available cash / shares
+    [*] --> REJECTED: BUY, SELL or CASH_OUT beyond availability (persisted, still 201)
+    NEW --> CANCELLED: POST /orders/:id/cancel (releases the reservation)
+    FILLED --> [*]
+    REJECTED --> [*]
+    CANCELLED --> [*]
+```
+
+| Row                 | `cash.total`   | `cash.reserved` | Position `quantity` | Position `reservedQuantity` |
+| ------------------- | -------------- | --------------- | ------------------- | --------------------------- |
+| `FILLED` BUY        | − size × price |                 | + size              |                             |
+| `FILLED` SELL       | + size × price |                 | − size              |                             |
+| `FILLED` CASH_IN    | + amount       |                 |                     |                             |
+| `FILLED` CASH_OUT   | − amount       |                 |                     |                             |
+| `NEW` LIMIT BUY     |                | + size × price  |                     |                             |
+| `NEW` LIMIT SELL    |                |                 |                     | + size                      |
+| `REJECTED` (any)    |                |                 |                     |                             |
+| `NEW` → `CANCELLED` |                | − size × price  |                     | − size                      |
+
+`cash.available = total − reserved` and `availableQuantity = quantity − reservedQuantity` are what every sufficiency check reads, always under the per-user lock. `FILLED`, `REJECTED` and `CANCELLED` are terminal: cancelling any of them is a `409 ORDER_NOT_CANCELLABLE`.
+
 ## Architecture
 
 ```mermaid
