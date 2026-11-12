@@ -37,7 +37,7 @@ open http://localhost:3000/docs        # Swagger UI
 
 With the shipped dataset, user 1 should show `totalValue` **904784.00**, available cash **627500.00**, positions in PAMP and METR, and a warning for the inconsistent BMA position (see [ADR-006](docs/DECISIONS.md#adr-006-inconsistent-seed-data-the-negative-bma-position)).
 
-Ready-made requests: [`docs/api.http`](docs/api.http) (VS Code REST Client). The OpenAPI document is exported to [`docs/openapi.json`](docs/openapi.json) and can be imported into Postman or Insomnia.
+Ready-made requests: [`docs/api.http`](docs/api.http) (VS Code REST Client) or import [`docs/postman_collection.json`](docs/postman_collection.json) together with [`docs/postman_environment.json`](docs/postman_environment.json) into Postman. The OpenAPI document is exported to [`docs/openapi.json`](docs/openapi.json).
 
 Stop everything with `docker compose down` (add `-v` to drop the database volume).
 
@@ -279,7 +279,7 @@ test/
   integration/                             # *.e2e-spec.ts
 k6/                                        # smoke.js, load.js, concurrency.js (+ lib/)
 docker/                                    # Dockerfile, entrypoint, prometheus + grafana provisioning
-docs/                                      # DECISIONS.md, api.http, openapi.json
+docs/                                      # DECISIONS.md, api.http, Postman collection, openapi.json
 ```
 
 ## Notes on the provided schema
