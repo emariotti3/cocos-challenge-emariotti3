@@ -11,6 +11,7 @@ import {
 } from '../instruments/instruments.repository';
 import { MarketdataService } from '../marketdata/marketdata.service';
 import { PortfolioRepository } from '../portfolio/portfolio.repository';
+import { MetricsService } from '../../observability/metrics/metrics.service';
 import { type UserRecord, UsersRepository } from '../users/users.repository';
 import { decideOrder } from './domain/order-decision';
 import type { ListOrdersQueryDto } from './dto/list-orders.query.dto';
@@ -29,6 +30,7 @@ export class OrdersService {
     private readonly instruments: InstrumentsRepository,
     private readonly marketdata: MarketdataService,
     private readonly ledger: PortfolioRepository,
+    private readonly metrics: MetricsService,
   ) {}
 
   /**
@@ -76,6 +78,7 @@ export class OrdersService {
       );
     });
 
+    this.metrics.recordOrder(record);
     this.logger.log(
       {
         userId: user.id,
@@ -121,6 +124,7 @@ export class OrdersService {
       }
       return order;
     });
+    this.metrics.recordCancellation();
     this.logger.log({ userId: user.id, orderId }, 'Order cancelled');
     return toOrderResponse(record);
   }
