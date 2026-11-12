@@ -32,6 +32,9 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      RATE_LIMIT_LIMIT: ${RATE_LIMIT_LIMIT:-100}
+      RATE_LIMIT_ORDERS_LIMIT: ${RATE_LIMIT_ORDERS_LIMIT:-20}
     ports:
       - "${API_PORT:-3000}:3000"
     depends_on:

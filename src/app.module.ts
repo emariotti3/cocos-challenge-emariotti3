@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ThrottlingModule } from './common/throttling/throttling.module';
 import { ConfigModule } from './config/config.module';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
@@ -13,6 +14,7 @@ import { LoggingModule } from './observability/logging/logging.module';
     ConfigModule,
     LoggingModule,
     DatabaseModule,
+    ThrottlingModule,
     HealthModule,
     UsersModule,
     InstrumentsModule,

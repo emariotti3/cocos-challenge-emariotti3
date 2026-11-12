@@ -1,0 +1,874 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/v1/instruments": {
+      "get": {
+        "description": "Case-insensitive partial match on ticker and/or name with latest price and daily return. Without filters returns the full paginated list. Cash (MONEDA) is never returned.",
+        "operationId": "InstrumentsController_search_v1",
+        "parameters": [
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Free text matched against ticker and name (case-insensitive, partial)",
+            "schema": {
+              "minLength": 1,
+              "maxLength": 50,
+              "example": "pamp",
+              "type": "string"
+            }
+          },
+          {
+            "name": "ticker",
+            "required": false,
+            "in": "query",
+            "description": "Partial ticker match",
+            "schema": {
+              "maxLength": 10,
+              "example": "GGAL",
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "required": false,
+            "in": "query",
+            "description": "Partial name match",
+            "schema": {
+              "maxLength": 50,
+              "example": "banco",
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstrumentListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Search instruments",
+        "tags": [
+          "instruments"
+        ]
+      }
+    },
+    "/api/v1/instruments/{id}": {
+      "get": {
+        "operationId": "InstrumentsController_getById_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstrumentResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "INSTRUMENT_NOT_FOUND"
+          }
+        },
+        "summary": "Get one instrument with its latest price",
+        "tags": [
+          "instruments"
+        ]
+      }
+    },
+    "/api/v1/users/{userId}/portfolio": {
+      "get": {
+        "description": "Total account value, cash (total, reserved by pending LIMIT buys, available) and open positions valued at the latest close, with weighted-average cost and returns. Derived entirely from the orders ledger.",
+        "operationId": "PortfolioController_getPortfolio_v1",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "example": 1,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "USER_NOT_FOUND"
+          }
+        },
+        "summary": "Get a user portfolio",
+        "tags": [
+          "portfolio"
+        ]
+      }
+    },
+    "/api/v1/users/{userId}/orders": {
+      "post": {
+        "description": "Send `size` (shares) or `amount` (ARS budget converted to whole shares). MARKET orders execute at the last close and return FILLED; LIMIT orders need `price` and return NEW. Orders exceeding available cash (BUY) or available shares (SELL) are saved and returned as REJECTED with a `rejectionReason`, still with HTTP 201.",
+        "operationId": "OrdersController_place_v1",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "example": 1,
+              "type": "number"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaceOrderDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Order persisted (FILLED, NEW or REJECTED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "404": {
+            "description": "USER_NOT_FOUND | INSTRUMENT_NOT_FOUND"
+          },
+          "422": {
+            "description": "NOT_TRADABLE | NO_MARKET_PRICE | AMOUNT_TOO_SMALL | ORDER_TOO_LARGE"
+          }
+        },
+        "summary": "Place an order",
+        "tags": [
+          "orders"
+        ]
+      },
+      "get": {
+        "operationId": "OrdersController_list_v1",
+        "parameters": [
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "NEW",
+                "FILLED",
+                "REJECTED",
+                "CANCELLED"
+              ]
+            }
+          },
+          {
+            "name": "side",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "BUY",
+                "SELL",
+                "CASH_IN",
+                "CASH_OUT"
+              ]
+            }
+          },
+          {
+            "name": "instrumentId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "example": 47,
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "Opaque cursor from the previous page (`meta.nextCursor`)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "example": 1,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderListResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "USER_NOT_FOUND"
+          }
+        },
+        "summary": "List orders (newest first, cursor paginated)",
+        "tags": [
+          "orders"
+        ]
+      }
+    },
+    "/api/v1/users/{userId}/orders/{orderId}": {
+      "get": {
+        "operationId": "OrdersController_get_v1",
+        "parameters": [
+          {
+            "name": "orderId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "example": 1,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "USER_NOT_FOUND | ORDER_NOT_FOUND"
+          }
+        },
+        "summary": "Get one order",
+        "tags": [
+          "orders"
+        ]
+      }
+    },
+    "/api/v1/users/{userId}/orders/{orderId}/cancel": {
+      "post": {
+        "operationId": "OrdersController_cancel_v1",
+        "parameters": [
+          {
+            "name": "orderId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "example": 1,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Order is now CANCELLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "USER_NOT_FOUND | ORDER_NOT_FOUND"
+          },
+          "409": {
+            "description": "ORDER_NOT_CANCELLABLE (order is not NEW)"
+          }
+        },
+        "summary": "Cancel a NEW order",
+        "tags": [
+          "orders"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "Cocos Challenge API",
+    "description": "Portfolio, instrument search and order placement API. Prices are in ARS; money values are decimal strings. Errors use RFC 7807 application/problem+json.",
+    "version": "1.0.0",
+    "contact": {}
+  },
+  "tags": [
+    {
+      "name": "instruments",
+      "description": "Instrument search and market data"
+    },
+    {
+      "name": "portfolio",
+      "description": "Account value, cash and positions"
+    },
+    {
+      "name": "orders",
+      "description": "Order placement, cancellation and history"
+    }
+  ],
+  "servers": [],
+  "components": {
+    "schemas": {
+      "InstrumentResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "example": 47
+          },
+          "ticker": {
+            "type": "string",
+            "example": "PAMP"
+          },
+          "name": {
+            "type": "string",
+            "example": "Pampa Holding S.A."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "ACCIONES",
+              "MONEDA"
+            ],
+            "example": "ACCIONES"
+          },
+          "lastPrice": {
+            "type": "string",
+            "nullable": true,
+            "example": "925.85",
+            "description": "Last price in ARS (latest close). Null when no market data exists."
+          },
+          "previousClose": {
+            "type": "string",
+            "nullable": true,
+            "example": "921.80"
+          },
+          "dailyReturnPct": {
+            "type": "string",
+            "nullable": true,
+            "example": "0.44",
+            "description": "Daily return in percent: (close - previousClose) / previousClose * 100"
+          },
+          "priceDate": {
+            "type": "string",
+            "nullable": true,
+            "example": "2023-07-14",
+            "description": "Trading day of lastPrice"
+          }
+        },
+        "required": [
+          "id",
+          "ticker",
+          "name",
+          "type",
+          "lastPrice",
+          "previousClose",
+          "dailyReturnPct",
+          "priceDate"
+        ]
+      },
+      "PageMetaDto": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "number",
+            "example": 1
+          },
+          "limit": {
+            "type": "number",
+            "example": 20
+          },
+          "total": {
+            "type": "number",
+            "example": 65,
+            "description": "Total matching items across all pages"
+          }
+        },
+        "required": [
+          "page",
+          "limit",
+          "total"
+        ]
+      },
+      "InstrumentListResponseDto": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InstrumentResponseDto"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PageMetaDto"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ]
+      },
+      "CashSummaryDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "string",
+            "example": "753000.00",
+            "description": "Net cash from all FILLED movements"
+          },
+          "reserved": {
+            "type": "string",
+            "example": "125500.00",
+            "description": "Cash committed by pending (NEW) LIMIT BUY orders"
+          },
+          "available": {
+            "type": "string",
+            "example": "627500.00",
+            "description": "total - reserved: spendable on new orders"
+          }
+        },
+        "required": [
+          "total",
+          "reserved",
+          "available"
+        ]
+      },
+      "PositionDto": {
+        "type": "object",
+        "properties": {
+          "instrumentId": {
+            "type": "number",
+            "example": 47
+          },
+          "ticker": {
+            "type": "string",
+            "example": "PAMP"
+          },
+          "name": {
+            "type": "string",
+            "example": "Pampa Holding S.A."
+          },
+          "quantity": {
+            "type": "number",
+            "example": 40,
+            "description": "Net FILLED quantity"
+          },
+          "reservedQuantity": {
+            "type": "number",
+            "example": 0,
+            "description": "Shares committed by pending (NEW) LIMIT SELL orders"
+          },
+          "availableQuantity": {
+            "type": "number",
+            "example": 40,
+            "description": "quantity - reservedQuantity: sellable now"
+          },
+          "lastPrice": {
+            "type": "string",
+            "nullable": true,
+            "example": "925.85",
+            "description": "Latest close"
+          },
+          "marketValue": {
+            "type": "string",
+            "example": "37034.00",
+            "description": "quantity * lastPrice (\"0.00\" without market data)"
+          },
+          "averageCost": {
+            "type": "string",
+            "example": "930.00",
+            "description": "Weighted average purchase price"
+          },
+          "costBasis": {
+            "type": "string",
+            "example": "37200.00",
+            "description": "quantity * averageCost"
+          },
+          "unrealizedPnl": {
+            "type": "string",
+            "nullable": true,
+            "example": "-166.00",
+            "description": "marketValue - costBasis"
+          },
+          "totalReturnPct": {
+            "type": "string",
+            "nullable": true,
+            "example": "-0.45",
+            "description": "(marketValue - costBasis) / costBasis * 100"
+          },
+          "dailyReturnPct": {
+            "type": "string",
+            "nullable": true,
+            "example": "0.44",
+            "description": "(close - previousClose) / previousClose * 100"
+          }
+        },
+        "required": [
+          "instrumentId",
+          "ticker",
+          "name",
+          "quantity",
+          "reservedQuantity",
+          "availableQuantity",
+          "lastPrice",
+          "marketValue",
+          "averageCost",
+          "costBasis",
+          "unrealizedPnl",
+          "totalReturnPct",
+          "dailyReturnPct"
+        ]
+      },
+      "PortfolioWarningDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "NEGATIVE_POSITION",
+            "enum": [
+              "NEGATIVE_POSITION",
+              "OVERSOLD_POSITION",
+              "NO_MARKET_PRICE"
+            ]
+          },
+          "instrumentId": {
+            "type": "number",
+            "example": 31
+          },
+          "quantity": {
+            "type": "number",
+            "example": -10
+          },
+          "detail": {
+            "type": "string",
+            "example": "FILLED SELL quantity exceeds FILLED BUY quantity; position excluded"
+          }
+        },
+        "required": [
+          "code",
+          "instrumentId",
+          "detail"
+        ]
+      },
+      "PortfolioResponseDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "number",
+            "example": 1
+          },
+          "accountNumber": {
+            "type": "string",
+            "example": "10001"
+          },
+          "currency": {
+            "type": "string",
+            "example": "ARS"
+          },
+          "asOf": {
+            "type": "string",
+            "nullable": true,
+            "example": "2023-07-14",
+            "description": "Latest market data date used"
+          },
+          "totalValue": {
+            "type": "string",
+            "example": "904784.00",
+            "description": "cash.total + sum(position marketValue)"
+          },
+          "cash": {
+            "$ref": "#/components/schemas/CashSummaryDto"
+          },
+          "positions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PositionDto"
+            }
+          },
+          "warnings": {
+            "description": "Data anomalies detected while computing the portfolio (absent when none)",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortfolioWarningDto"
+            }
+          }
+        },
+        "required": [
+          "userId",
+          "accountNumber",
+          "currency",
+          "asOf",
+          "totalValue",
+          "cash",
+          "positions"
+        ]
+      },
+      "PlaceOrderDto": {
+        "type": "object",
+        "properties": {
+          "instrumentId": {
+            "type": "number",
+            "example": 47,
+            "description": "Instrument id (see GET /instruments)"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "BUY",
+              "SELL"
+            ],
+            "example": "BUY"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "MARKET",
+              "LIMIT"
+            ],
+            "example": "MARKET",
+            "description": "MARKET executes immediately at the last close (FILLED). LIMIT is accepted as NEW at the given price."
+          },
+          "size": {
+            "type": "number",
+            "example": 10,
+            "minimum": 1,
+            "description": "Exact number of shares. Send either `size` or `amount`, not both."
+          },
+          "amount": {
+            "type": "string",
+            "example": "100000.00",
+            "description": "ARS budget. Converted to the maximum whole number of shares at the execution price (close for MARKET, `price` for LIMIT). No fractional shares."
+          },
+          "price": {
+            "type": "string",
+            "example": "900.00",
+            "description": "Limit price in ARS. Required for LIMIT, forbidden for MARKET."
+          }
+        },
+        "required": [
+          "instrumentId",
+          "side",
+          "type"
+        ]
+      },
+      "OrderResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number",
+            "example": 12
+          },
+          "userId": {
+            "type": "number",
+            "example": 1
+          },
+          "instrumentId": {
+            "type": "number",
+            "example": 47
+          },
+          "ticker": {
+            "type": "string",
+            "example": "PAMP"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "BUY",
+              "SELL",
+              "CASH_IN",
+              "CASH_OUT"
+            ],
+            "example": "BUY"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "MARKET",
+              "LIMIT"
+            ],
+            "example": "MARKET"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "NEW",
+              "FILLED",
+              "REJECTED",
+              "CANCELLED"
+            ],
+            "example": "FILLED",
+            "description": "MARKET -> FILLED, LIMIT -> NEW, insufficient cash/shares -> REJECTED (persisted), cancelled by user -> CANCELLED"
+          },
+          "size": {
+            "type": "number",
+            "example": 10,
+            "description": "Shares (resolved from `amount` when a budget was sent)"
+          },
+          "price": {
+            "type": "string",
+            "example": "925.85",
+            "description": "Execution price (MARKET: last close) or limit price"
+          },
+          "notional": {
+            "type": "string",
+            "example": "9258.50",
+            "description": "size * price"
+          },
+          "rejectionReason": {
+            "type": "string",
+            "enum": [
+              "INSUFFICIENT_FUNDS",
+              "INSUFFICIENT_SHARES"
+            ],
+            "nullable": true,
+            "example": null
+          },
+          "datetime": {
+            "type": "string",
+            "example": "2023-07-14T15:04:05.000Z"
+          }
+        },
+        "required": [
+          "id",
+          "userId",
+          "instrumentId",
+          "ticker",
+          "side",
+          "type",
+          "status",
+          "size",
+          "price",
+          "notional",
+          "datetime"
+        ]
+      },
+      "OrderListMetaDto": {
+        "type": "object",
+        "properties": {
+          "nextCursor": {
+            "type": "string",
+            "nullable": true,
+            "description": "Pass as `cursor` to fetch the next page; null on the last page"
+          }
+        },
+        "required": [
+          "nextCursor"
+        ]
+      },
+      "OrderListResponseDto": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderResponseDto"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/OrderListMetaDto"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ]
+      }
+    }
+  }
+}

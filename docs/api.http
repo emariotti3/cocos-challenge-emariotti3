@@ -1,0 +1,166 @@
+### Cocos Challenge API - VS Code REST Client collection
+### Install the "REST Client" extension, start the API (docker compose up) and click "Send Request".
+@baseUrl = http://localhost:3000
+@api = {{baseUrl}}/api/v1
+@userId = 1
+@pamp = 47
+
+### ---------------------------------------------------------------- Operational
+
+### Liveness (no dependencies)
+GET {{baseUrl}}/health/live
+
+### Readiness (database ping)
+GET {{baseUrl}}/health/ready
+
+### Prometheus metrics
+GET {{baseUrl}}/metrics
+
+### OpenAPI document (Swagger UI at {{baseUrl}}/docs)
+GET {{baseUrl}}/docs-json
+
+### ---------------------------------------------------------------- Instruments
+
+### Search by ticker fragment
+GET {{api}}/instruments?q=pamp
+
+### Search by name fragment (case-insensitive), 5 per page
+GET {{api}}/instruments?q=banco&limit=5
+
+### Explicit ticker + name filters (AND)
+GET {{api}}/instruments?ticker=GGAL&name=galicia
+
+### Full tradable list, page 2
+GET {{api}}/instruments?page=2&limit=10
+
+### One instrument with latest price and daily return
+GET {{api}}/instruments/{{pamp}}
+
+### Instrument without market data (prices are null)
+GET {{api}}/instruments/3
+
+### 404 problem+json
+GET {{api}}/instruments/999
+
+### 400 validation problem (limit > 100)
+GET {{api}}/instruments?limit=500
+
+### ---------------------------------------------------------------- Portfolio
+
+### Seed user 1: totalValue 904784.00, available cash 627500.00, PAMP + METR, warning for BMA
+GET {{api}}/users/{{userId}}/portfolio
+
+### Empty portfolio
+GET {{api}}/users/2/portfolio
+
+### Unknown user -> 404 USER_NOT_FOUND
+GET {{api}}/users/999/portfolio
+
+### ---------------------------------------------------------------- Orders
+
+### MARKET BUY by exact size -> 201 FILLED at the last close
+POST {{api}}/users/{{userId}}/orders
+Content-Type: application/json
+
+{ "instrumentId": {{pamp}}, "side": "BUY", "type": "MARKET", "size": 10 }
+
+### MARKET BUY by ARS amount -> size = floor(amount / close) (100000 / 925.85 = 108)
+POST {{api}}/users/{{userId}}/orders
+Content-Type: application/json
+
+{ "instrumentId": {{pamp}}, "side": "BUY", "type": "MARKET", "amount": "100000" }
+
+### MARKET SELL -> 201 FILLED
+POST {{api}}/users/{{userId}}/orders
+Content-Type: application/json
+
+{ "instrumentId": {{pamp}}, "side": "SELL", "type": "MARKET", "size": 5 }
+
+### LIMIT BUY -> 201 NEW (reserves cash until filled or cancelled)
+# @name limitBuy
+POST {{api}}/users/{{userId}}/orders
+Content-Type: application/json
+
+{ "instrumentId": {{pamp}}, "side": "BUY", "type": "LIMIT", "size": 10, "price": "900.00" }
+
+### Cancel the LIMIT order above -> 200 CANCELLED
+POST {{api}}/users/{{userId}}/orders/{{limitBuy.response.body.id}}/cancel
+
+### LIMIT SELL -> 201 NEW (reserves shares)
+POST {{api}}/users/{{userId}}/orders
+Content-Type: application/json
+
+{ "instrumentId": {{pamp}}, "side": "SELL", "type": "LIMIT", "size": 5, "price": "1000.00" }
+
+### Insufficient cash -> 201 with status REJECTED / INSUFFICIENT_FUNDS (persisted)
+POST {{api}}/users/{{userId}}/orders
+Content-Type: application/json
+
+{ "instrumentId": {{pamp}}, "side": "BUY", "type": "MARKET", "size": 10000 }
+
+### Insufficient shares -> 201 with status REJECTED / INSUFFICIENT_SHARES (persisted)
+POST {{api}}/users/{{userId}}/orders
+Content-Type: application/json
+
+{ "instrumentId": {{pamp}}, "side": "SELL", "type": "MARKET", "size": 100000 }
+
+### LIMIT without price -> 400 VALIDATION_ERROR
+POST {{api}}/users/{{userId}}/orders
+Content-Type: application/json
+
+{ "instrumentId": {{pamp}}, "side": "BUY", "type": "LIMIT", "size": 1 }
+
+### MARKET with price -> 400 VALIDATION_ERROR
+POST {{api}}/users/{{userId}}/orders
+Content-Type: application/json
+
+{ "instrumentId": {{pamp}}, "side": "BUY", "type": "MARKET", "size": 1, "price": "900" }
+
+### Both size and amount -> 400 VALIDATION_ERROR
+POST {{api}}/users/{{userId}}/orders
+Content-Type: application/json
+
+{ "instrumentId": {{pamp}}, "side": "BUY", "type": "MARKET", "size": 1, "amount": "1000" }
+
+### Amount below one share -> 422 AMOUNT_TOO_SMALL (nothing persisted)
+POST {{api}}/users/{{userId}}/orders
+Content-Type: application/json
+
+{ "instrumentId": {{pamp}}, "side": "BUY", "type": "MARKET", "amount": "900" }
+
+### Cash instrument -> 422 NOT_TRADABLE
+POST {{api}}/users/{{userId}}/orders
+Content-Type: application/json
+
+{ "instrumentId": 66, "side": "BUY", "type": "MARKET", "size": 1 }
+
+### Instrument without market data -> 422 NO_MARKET_PRICE
+POST {{api}}/users/{{userId}}/orders
+Content-Type: application/json
+
+{ "instrumentId": 3, "side": "BUY", "type": "MARKET", "size": 1 }
+
+### Unknown instrument -> 404 INSTRUMENT_NOT_FOUND
+POST {{api}}/users/{{userId}}/orders
+Content-Type: application/json
+
+{ "instrumentId": 9999, "side": "BUY", "type": "MARKET", "size": 1 }
+
+### Cancel a FILLED order -> 409 ORDER_NOT_CANCELLABLE
+POST {{api}}/users/{{userId}}/orders/2/cancel
+
+### Cancel seed order 5 (NEW) -> 200 CANCELLED
+POST {{api}}/users/{{userId}}/orders/5/cancel
+
+### Order history, newest first (follow meta.nextCursor for the next page)
+GET {{api}}/users/{{userId}}/orders?limit=5
+
+### Filter history
+GET {{api}}/users/{{userId}}/orders?status=NEW
+
+### One order
+GET {{api}}/users/{{userId}}/orders/1
+
+### Idempotent request id propagation (echoed in the response header and problem body)
+GET {{api}}/users/{{userId}}/orders/999999
+X-Request-Id: my-trace-id-123
