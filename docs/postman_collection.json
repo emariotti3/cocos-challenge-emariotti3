@@ -1,0 +1,910 @@
+{
+  "info": {
+    "name": "Cocos Challenge API",
+    "description": "Portfolio, instrument search and order placement. Import docs/postman_environment.json for the variables.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "api",
+      "value": "http://localhost:3000/api/v1"
+    },
+    {
+      "key": "userId",
+      "value": "1"
+    },
+    {
+      "key": "pamp",
+      "value": "47"
+    }
+  ],
+  "item": [
+    {
+      "name": "Operational",
+      "item": [
+        {
+          "name": "Liveness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/live",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "live"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Readiness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/ready",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "ready"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "OpenAPI JSON",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/docs-json",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "docs-json"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "Instruments",
+      "item": [
+        {
+          "name": "Search by ticker",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api}}/instruments?q=pamp",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "instruments"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "pamp"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Search by name",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api}}/instruments?q=banco&limit=5",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "instruments"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "banco"
+                },
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Ticker + name filters",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api}}/instruments?ticker=GGAL&name=galicia",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "instruments"
+              ],
+              "query": [
+                {
+                  "key": "ticker",
+                  "value": "GGAL"
+                },
+                {
+                  "key": "name",
+                  "value": "galicia"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Full list (page 2)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api}}/instruments?page=2&limit=10",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "instruments"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "2"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Get one",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api}}/instruments/{{pamp}}",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "instruments",
+                "{{pamp}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Get one without market data",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api}}/instruments/3",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "instruments",
+                "3"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Not found (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api}}/instruments/999",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "instruments",
+                "999"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Validation error (400)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api}}/instruments?limit=500",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "instruments"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "500"
+                }
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "Portfolio",
+      "item": [
+        {
+          "name": "User portfolio",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/portfolio",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "portfolio"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "\"Seed user 1: totalValue 904784.00, available 627500.00\"",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Empty portfolio",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api}}/users/2/portfolio",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "2",
+                "portfolio"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Unknown user (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api}}/users/999/portfolio",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "999",
+                "portfolio"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "Orders",
+      "item": [
+        {
+          "name": "MARKET BUY by size",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders"
+              ]
+            },
+            "description": "201 FILLED at the last close",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"instrumentId\": 47,\n  \"side\": \"BUY\",\n  \"type\": \"MARKET\",\n  \"size\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "MARKET BUY by amount",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders"
+              ]
+            },
+            "description": "size = floor(amount / close)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"instrumentId\": 47,\n  \"side\": \"BUY\",\n  \"type\": \"MARKET\",\n  \"amount\": \"100000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "MARKET SELL",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"instrumentId\": 47,\n  \"side\": \"SELL\",\n  \"type\": \"MARKET\",\n  \"size\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "LIMIT BUY",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders"
+              ]
+            },
+            "description": "201 NEW, reserves cash",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"instrumentId\": 47,\n  \"side\": \"BUY\",\n  \"type\": \"LIMIT\",\n  \"size\": 10,\n  \"price\": \"900.00\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "LIMIT SELL",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders"
+              ]
+            },
+            "description": "201 NEW, reserves shares",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"instrumentId\": 47,\n  \"side\": \"SELL\",\n  \"type\": \"LIMIT\",\n  \"size\": 5,\n  \"price\": \"1000.00\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Insufficient cash (REJECTED)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders"
+              ]
+            },
+            "description": "201 with status REJECTED / INSUFFICIENT_FUNDS",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"instrumentId\": 47,\n  \"side\": \"BUY\",\n  \"type\": \"MARKET\",\n  \"size\": 10000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Insufficient shares (REJECTED)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"instrumentId\": 47,\n  \"side\": \"SELL\",\n  \"type\": \"MARKET\",\n  \"size\": 100000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "LIMIT without price (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"instrumentId\": 47,\n  \"side\": \"BUY\",\n  \"type\": \"LIMIT\",\n  \"size\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "MARKET with price (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"instrumentId\": 47,\n  \"side\": \"BUY\",\n  \"type\": \"MARKET\",\n  \"size\": 1,\n  \"price\": \"900\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Amount too small (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"instrumentId\": 47,\n  \"side\": \"BUY\",\n  \"type\": \"MARKET\",\n  \"amount\": \"900\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Cash instrument (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"instrumentId\": 66,\n  \"side\": \"BUY\",\n  \"type\": \"MARKET\",\n  \"size\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "No market price (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"instrumentId\": 3,\n  \"side\": \"BUY\",\n  \"type\": \"MARKET\",\n  \"size\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Unknown instrument (404)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"instrumentId\": 9999,\n  \"side\": \"BUY\",\n  \"type\": \"MARKET\",\n  \"size\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Cancel NEW order (seed id 5)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders/5/cancel",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders",
+                "5",
+                "cancel"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Cancel FILLED order (409)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders/2/cancel",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders",
+                "2",
+                "cancel"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "List orders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders?limit=5",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "List NEW orders",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders?status=NEW",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "NEW"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Get one order",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders/1",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders",
+                "1"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    }
+  ]
+}

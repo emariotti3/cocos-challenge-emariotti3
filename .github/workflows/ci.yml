@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: 24
+
+jobs:
+  lint:
+    name: Lint, format, typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test -- --ci
+
+  coverage:
+    name: Unit + integration tests with coverage
+    runs-on: ubuntu-latest
+    # Testcontainers starts postgres:16-alpine through the runner's Docker daemon.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run test:cov -- --ci
+      - name: Coverage summary
+        if: always()
+        run: |
+          node -e '
+            const s = require("./coverage/coverage-summary.json").total;
+            const row = (k) => `| ${k} | ${s[k].pct}% | ${s[k].covered}/${s[k].total} |`;
+            console.log("## Coverage\n\n| Metric | % | Covered |\n|---|---|---|");
+            for (const k of ["statements","branches","functions","lines"]) console.log(row(k));
+          ' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 14
+      - name: Upload to Codecov (optional, needs CODECOV_TOKEN)
+        if: env.CODECOV_TOKEN != ''
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage/lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  docker:
+    name: Docker image builds and is healthy
+    runs-on: ubuntu-latest
+    needs: [lint, unit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          load: true
+          tags: cocos-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Start stack with the built image
+        run: docker compose up -d --no-build
+        env:
+          API_IMAGE: cocos-api:ci
+          # the smoke script places ~4 ledger mutations per second from one IP; the 20/min budget would 429 it
+          RATE_LIMIT_ENABLED: 'false'
+      - name: Wait for readiness
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/health/ready; then echo; echo "ready after ${i}s"; exit 0; fi
+            sleep 2
+          done
+          docker compose logs api; exit 1
+      - name: Smoke the seeded API
+        run: |
+          curl -sf 'http://localhost:3000/api/v1/instruments?q=pamp' | grep -q '"PAMP"'
+          curl -sf http://localhost:3000/api/v1/users/1/portfolio | grep -q '"totalValue":"904784.00"'
+      - name: Install k6
+        uses: grafana/setup-k6-action@v1
+      - name: k6 smoke
+        run: k6 run --quiet -e DURATION=15s k6/smoke.js
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs api
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
