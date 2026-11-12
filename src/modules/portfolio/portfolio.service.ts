@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/sequelize';
 import { type Sequelize, Transaction } from 'sequelize';
+import { CURRENCY } from '../../common/domain/constants';
 import { Money, percentChange } from '../../common/money/money';
 import {
   type InstrumentRecord,
@@ -12,6 +13,7 @@ import {
   type ComputedPosition,
   computePositions,
   type PositionWarning,
+  PositionWarningCode,
 } from './domain/position-calculator';
 import type { PortfolioResponseDto, PositionDto } from './dto/portfolio.response.dto';
 import { PortfolioRepository } from './portfolio.repository';
@@ -70,7 +72,7 @@ export class PortfolioService {
     return {
       userId: user.id,
       accountNumber: user.accountNumber,
-      currency: 'ARS',
+      currency: CURRENCY,
       asOf,
       totalValue: cash.total.plus(positionsValue).toFixed(),
       cash: {
@@ -100,7 +102,7 @@ export function valuePosition(
   const warning: PositionWarning | undefined = price
     ? undefined
     : {
-        code: 'NO_MARKET_PRICE',
+        code: PositionWarningCode.NO_MARKET_PRICE,
         instrumentId: position.instrumentId,
         quantity: position.quantity,
         detail: 'No market data for this instrument; market value reported as 0.00',

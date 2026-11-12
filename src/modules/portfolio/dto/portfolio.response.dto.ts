@@ -1,4 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { CURRENCY } from '../../../common/domain/constants';
+import { PositionWarningCode } from '../domain/position-calculator';
 
 export class CashSummaryDto {
   @ApiProperty({ example: '753000.00', description: 'Net cash from all FILLED movements' })
@@ -75,8 +77,8 @@ export class PositionDto {
 
 export class PortfolioWarningDto {
   @ApiProperty({
-    example: 'NEGATIVE_POSITION',
-    enum: ['NEGATIVE_POSITION', 'OVERSOLD_POSITION', 'NO_MARKET_PRICE'],
+    example: PositionWarningCode.NEGATIVE_POSITION,
+    enum: Object.values(PositionWarningCode),
   })
   code!: string;
 
@@ -97,8 +99,8 @@ export class PortfolioResponseDto {
   @ApiProperty({ example: '10001' })
   accountNumber!: string;
 
-  @ApiProperty({ example: 'ARS' })
-  currency!: 'ARS';
+  @ApiProperty({ example: CURRENCY })
+  currency!: typeof CURRENCY;
 
   @ApiProperty({
     type: String,

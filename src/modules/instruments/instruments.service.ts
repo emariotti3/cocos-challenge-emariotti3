@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { NotFoundError } from '../../common/errors/app.error';
+import { ErrorCode } from '../../common/errors/error-codes';
 import { MarketdataService, type PriceSnapshot } from '../marketdata/marketdata.service';
 import type {
   InstrumentListResponseDto,
@@ -30,7 +31,7 @@ export class InstrumentsService {
   async getById(id: number): Promise<InstrumentResponseDto> {
     const instrument = await this.instruments.findById(id);
     if (!instrument) {
-      throw new NotFoundError('INSTRUMENT_NOT_FOUND', `Instrument ${id} does not exist`, {
+      throw new NotFoundError(ErrorCode.INSTRUMENT_NOT_FOUND, `Instrument ${id} does not exist`, {
         instrumentId: id,
       });
     }

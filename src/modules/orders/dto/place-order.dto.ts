@@ -10,6 +10,12 @@ import {
   ValidateIf,
   type ValidationArguments,
 } from 'class-validator';
+import {
+  MAX_AMOUNT_EXCLUSIVE,
+  MAX_ORDER_SIZE,
+  MAX_PRICE_EXCLUSIVE,
+  MONEY_DECIMALS,
+} from '../../../common/domain/constants';
 import { OrderSide, OrderType } from '../../../common/domain/enums';
 import {
   IsPositiveDecimal,
@@ -17,12 +23,6 @@ import {
 } from '../../../common/validation/decimal.validators';
 import { PG_INT_MAX } from '../../../common/validation/limits';
 import { trim } from '../../../common/validation/transforms';
-
-export const MAX_ORDER_SIZE = 1_000_000_000;
-/** NUMERIC(10,2) upper bound for prices. */
-export const MAX_PRICE_EXCLUSIVE = 100_000_000;
-/** Budget cap; keeps floor(amount / price) comfortably inside MAX_ORDER_SIZE for any price >= 0.01. */
-export const MAX_AMOUNT_EXCLUSIVE = 10_000_000_000;
 
 export type TradeSide = OrderSide.BUY | OrderSide.SELL;
 
@@ -59,7 +59,10 @@ function PriceMatchesOrderType() {
           if (type === OrderType.LIMIT) {
             return (
               value !== undefined &&
-              isPositiveDecimal(value, { maxDecimals: 2, lessThan: MAX_PRICE_EXCLUSIVE })
+              isPositiveDecimal(value, {
+                maxDecimals: MONEY_DECIMALS,
+                lessThan: MAX_PRICE_EXCLUSIVE,
+              })
             );
           }
           return true; // an invalid type is reported by @IsEnum on `type`
@@ -123,7 +126,7 @@ export class PlaceOrderDto {
   })
   @Transform(trim)
   @ValidateIf((dto: PlaceOrderDto) => dto.amount !== undefined)
-  @IsPositiveDecimal({ maxDecimals: 2, lessThan: MAX_AMOUNT_EXCLUSIVE })
+  @IsPositiveDecimal({ maxDecimals: MONEY_DECIMALS, lessThan: MAX_AMOUNT_EXCLUSIVE })
   @NotWithSize()
   amount?: string | number;
 

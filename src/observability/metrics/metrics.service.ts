@@ -4,6 +4,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from 'prom-client';
 import type { Sequelize } from 'sequelize';
 import type { OrderSide, OrderStatus, OrderType, RejectionReason } from '../../common/domain/enums';
+import { SERVICE_NAME } from '../../common/http/constants';
 
 interface PoolStats {
   size: number;
@@ -79,7 +80,7 @@ export class MetricsService {
   });
 
   constructor(@InjectConnection() sequelize: Sequelize) {
-    this.registry.setDefaultLabels({ service: 'cocos-api' });
+    this.registry.setDefaultLabels({ service: SERVICE_NAME });
     collectDefaultMetrics({ register: this.registry });
     new Gauge({
       name: 'db_pool_connections',

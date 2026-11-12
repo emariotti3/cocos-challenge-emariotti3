@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { CASH_TICKER, OrderSide, OrderStatus, OrderType } from '../../common/domain/enums';
+import { CASH_TICKER, CASH_UNIT_PRICE } from '../../common/domain/constants';
+import { OrderSide, OrderStatus, OrderType } from '../../common/domain/enums';
 import { logOperationFailure } from '../../common/logging/operation-log';
 import { Money } from '../../common/money/money';
 import { MetricsService } from '../../observability/metrics/metrics.service';
@@ -14,9 +15,6 @@ import { PortfolioRepository } from '../portfolio/portfolio.repository';
 import { type UserRecord, UsersRepository } from '../users/users.repository';
 import { type CashSide, decideCashMovement } from './domain/cash-decision';
 import type { CashMovementDto } from './dto/cash-movement.dto';
-
-/** Cash movements are priced at 1 ARS per unit, as in the provided dataset. */
-const CASH_UNIT_PRICE = '1.00';
 
 /**
  * Deposits (CASH_IN) and withdrawals (CASH_OUT), modelled as orders on the

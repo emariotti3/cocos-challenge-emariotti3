@@ -2,6 +2,11 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsEnum, IsInt, IsOptional, IsPositive, IsString, Length, Max, Min } from 'class-validator';
 import { OrderSide, OrderStatus } from '../../../common/domain/enums';
+import {
+  DEFAULT_PAGE_SIZE,
+  MAX_CURSOR_LENGTH,
+  MAX_PAGE_SIZE,
+} from '../../../common/domain/constants';
 import { PG_INT_MAX } from '../../../common/validation/limits';
 
 export class ListOrdersQueryDto {
@@ -23,17 +28,17 @@ export class ListOrdersQueryDto {
   @IsInt()
   instrumentId?: number;
 
-  @ApiPropertyOptional({ default: 20, minimum: 1, maximum: 100 })
+  @ApiPropertyOptional({ default: DEFAULT_PAGE_SIZE, minimum: 1, maximum: MAX_PAGE_SIZE })
   @IsOptional()
   @Type(() => Number)
-  @Max(100)
+  @Max(MAX_PAGE_SIZE)
   @Min(1)
   @IsInt()
-  limit: number = 20;
+  limit: number = DEFAULT_PAGE_SIZE;
 
   @ApiPropertyOptional({ description: 'Opaque cursor from the previous page (`meta.nextCursor`)' })
   @IsOptional()
   @IsString()
-  @Length(1, 200)
+  @Length(1, MAX_CURSOR_LENGTH)
   cursor?: string;
 }

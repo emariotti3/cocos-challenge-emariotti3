@@ -17,7 +17,13 @@ export interface ComputedPosition {
   averageCost: Money;
 }
 
-export type PositionWarningCode = 'NEGATIVE_POSITION' | 'OVERSOLD_POSITION' | 'NO_MARKET_PRICE';
+/** Data anomalies surfaced in `portfolio.warnings[]` instead of failing the request. */
+export const PositionWarningCode = {
+  NEGATIVE_POSITION: 'NEGATIVE_POSITION',
+  OVERSOLD_POSITION: 'OVERSOLD_POSITION',
+  NO_MARKET_PRICE: 'NO_MARKET_PRICE',
+} as const;
+export type PositionWarningCode = (typeof PositionWarningCode)[keyof typeof PositionWarningCode];
 
 export interface PositionWarning {
   code: PositionWarningCode;
@@ -88,7 +94,7 @@ export function computePositions(trades: readonly TradeInput[]): PositionsResult
       });
       if (state.oversold) {
         warnings.push({
-          code: 'OVERSOLD_POSITION',
+          code: PositionWarningCode.OVERSOLD_POSITION,
           instrumentId,
           quantity: state.quantity,
           detail: 'A FILLED SELL exceeded the open quantity at the time; cost basis was reset',
@@ -96,7 +102,7 @@ export function computePositions(trades: readonly TradeInput[]): PositionsResult
       }
     } else if (state.quantity < 0) {
       warnings.push({
-        code: 'NEGATIVE_POSITION',
+        code: PositionWarningCode.NEGATIVE_POSITION,
         instrumentId,
         quantity: state.quantity,
         detail: 'FILLED SELL quantity exceeds FILLED BUY quantity; position excluded',

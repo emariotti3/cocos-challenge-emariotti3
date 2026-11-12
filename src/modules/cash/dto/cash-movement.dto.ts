@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsInt, IsPositive, Max } from 'class-validator';
+import { MAX_CASH_AMOUNT } from '../../../common/domain/constants';
 
 /**
  * Cash movements follow the dataset convention: one `orders` row with
@@ -7,7 +8,6 @@ import { IsInt, IsPositive, Max } from 'class-validator';
  * (`size` is an INTEGER column). Cents would require `size = 1, price =
  * amount`; see ADR-017.
  */
-export const MAX_CASH_AMOUNT = 2_000_000_000;
 
 export class CashMovementDto {
   @ApiProperty({

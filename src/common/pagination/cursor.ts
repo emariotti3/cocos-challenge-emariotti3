@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { validationProblem } from '../errors/validation.problem';
 import { isPgInt } from '../validation/limits';
 
 export interface OrderCursor {
@@ -33,10 +33,6 @@ export function decodeCursor(raw: string): OrderCursor {
     if (!isPgInt(parsed.i)) throw new Error('bad id');
     return { datetime: instant.toISOString(), id: parsed.i };
   } catch {
-    throw new BadRequestException({
-      code: 'VALIDATION_ERROR',
-      message: 'Request validation failed',
-      errors: [{ path: 'cursor', message: 'malformed pagination cursor' }],
-    });
+    throw validationProblem([{ path: 'cursor', message: 'malformed pagination cursor' }]);
   }
 }

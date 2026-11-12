@@ -1,4 +1,5 @@
 import DecimalJs from 'decimal.js';
+import { MONEY_DECIMALS, PERCENT_DECIMALS } from '../domain/constants';
 
 /** A private clone: this precision/rounding applies to Money only, not to every decimal.js user in the process. */
 const Decimal = DecimalJs.clone({ precision: 40, rounding: DecimalJs.ROUND_HALF_UP });
@@ -100,8 +101,8 @@ export class Money {
     return this.value.greaterThan(0);
   }
 
-  /** Fixed-point string, ROUND_HALF_UP. Default 2 decimals (ARS cents). */
-  toFixed(decimals = 2): string {
+  /** Fixed-point string, ROUND_HALF_UP. Defaults to MONEY_DECIMALS (ARS cents). */
+  toFixed(decimals = MONEY_DECIMALS): string {
     return this.value.toFixed(decimals);
   }
 
@@ -111,7 +112,7 @@ export class Money {
   }
 
   toJSON(): string {
-    return this.toFixed(2);
+    return this.toFixed();
   }
 
   toString(): string {
@@ -130,5 +131,9 @@ export function percentChange(
   if (base === null || base === undefined) return null;
   const baseMoney = Money.of(base);
   if (baseMoney.isZero()) return null;
-  return Money.of(current).minus(baseMoney).dividedBy(baseMoney).times(100).toFixed(2);
+  return Money.of(current)
+    .minus(baseMoney)
+    .dividedBy(baseMoney)
+    .times(100)
+    .toFixed(PERCENT_DECIMALS);
 }

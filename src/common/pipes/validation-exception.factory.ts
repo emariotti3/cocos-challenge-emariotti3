@@ -1,9 +1,7 @@
-import { BadRequestException, type ValidationError } from '@nestjs/common';
+import type { BadRequestException, ValidationError } from '@nestjs/common';
+import { type FieldError, validationProblem } from '../errors/validation.problem';
 
-export interface FieldError {
-  path: string;
-  message: string;
-}
+export type { FieldError } from '../errors/validation.problem';
 
 export function flattenValidationErrors(errors: ValidationError[], parent = ''): FieldError[] {
   return errors.flatMap((error) => {
@@ -16,9 +14,5 @@ export function flattenValidationErrors(errors: ValidationError[], parent = ''):
 
 /** Used by the global ValidationPipe so 400s carry a structured `errors[]`. */
 export function validationExceptionFactory(errors: ValidationError[]): BadRequestException {
-  return new BadRequestException({
-    code: 'VALIDATION_ERROR',
-    message: 'Request validation failed',
-    errors: flattenValidationErrors(errors),
-  });
+  return validationProblem(flattenValidationErrors(errors));
 }

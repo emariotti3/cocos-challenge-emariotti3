@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/sequelize';
 import { QueryTypes, type Sequelize, Transaction } from 'sequelize';
 import { NotFoundError, ServiceUnavailableError } from '../../common/errors/app.error';
+import { ErrorCode } from '../../common/errors/error-codes';
 import { UserModel } from '../../database/models';
 
 /**
@@ -75,7 +76,7 @@ export class UsersRepository {
       if (state !== undefined && TIMEOUT_SQLSTATES.has(state)) {
         this.logger.warn({ userId, sqlState: state }, 'Ledger transaction timed out');
         throw new ServiceUnavailableError(
-          'LEDGER_BUSY',
+          ErrorCode.LEDGER_BUSY,
           'The account is busy processing another operation; retry shortly',
           { userId },
         );
@@ -95,7 +96,9 @@ export class UsersRepository {
         const startedAt = process.hrtime.bigint();
         const locked = await this.lockForUpdate(userId, transaction);
         if (!locked) {
-          throw new NotFoundError('USER_NOT_FOUND', `User ${userId} does not exist`, { userId });
+          throw new NotFoundError(ErrorCode.USER_NOT_FOUND, `User ${userId} does not exist`, {
+            userId,
+          });
         }
         this.logger.debug(
           { userId, lockWaitMs: Number(process.hrtime.bigint() - startedAt) / 1e6 },

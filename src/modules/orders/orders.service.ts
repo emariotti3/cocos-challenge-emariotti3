@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { MAX_ORDER_SIZE, MONEY_DECIMALS } from '../../common/domain/constants';
 import { InstrumentType, OrderSide, OrderStatus, OrderType } from '../../common/domain/enums';
 import { ConflictError, NotFoundError, UnprocessableError } from '../../common/errors/app.error';
+import { ErrorCode } from '../../common/errors/error-codes';
 import { logOperationFailure } from '../../common/logging/operation-log';
 import { Money } from '../../common/money/money';
 import { decodeCursor, encodeCursor } from '../../common/pagination/cursor';
@@ -16,7 +18,7 @@ import { decideOrder } from './domain/order-decision';
 import type { ListOrdersQueryDto } from './dto/list-orders.query.dto';
 import { toOrderResponse } from './dto/order.mapper';
 import type { OrderListResponseDto, OrderResponseDto } from './dto/order.response.dto';
-import { MAX_ORDER_SIZE, type PlaceOrderDto } from './dto/place-order.dto';
+import type { PlaceOrderDto } from './dto/place-order.dto';
 import { type OrderRecord, OrdersRepository } from './orders.repository';
 
 @Injectable()
@@ -98,7 +100,7 @@ export class OrdersService {
             type: dto.type,
             status: decision.status,
             size,
-            price: price.toFixed(2),
+            price: price.toFixed(MONEY_DECIMALS),
             rejectionReason: decision.rejectionReason,
           },
           transaction,
@@ -132,14 +134,14 @@ export class OrdersService {
         const order = await this.orders.findByIdForUser(user.id, orderId, transaction);
         if (!order) {
           throw new NotFoundError(
-            'ORDER_NOT_FOUND',
+            ErrorCode.ORDER_NOT_FOUND,
             `Order ${orderId} does not exist for this user`,
             { orderId },
           );
         }
         if (changed === 0) {
           throw new ConflictError(
-            'ORDER_NOT_CANCELLABLE',
+            ErrorCode.ORDER_NOT_CANCELLABLE,
             `Order ${orderId} is ${order.status}; only NEW orders can be cancelled`,
             { orderId, orderStatus: order.status },
           );
@@ -169,9 +171,13 @@ export class OrdersService {
   async getOrder(user: UserRecord, orderId: number): Promise<OrderResponseDto> {
     const order = await this.orders.findByIdForUser(user.id, orderId);
     if (!order) {
-      throw new NotFoundError('ORDER_NOT_FOUND', `Order ${orderId} does not exist for this user`, {
-        orderId,
-      });
+      throw new NotFoundError(
+        ErrorCode.ORDER_NOT_FOUND,
+        `Order ${orderId} does not exist for this user`,
+        {
+          orderId,
+        },
+      );
     }
     return toOrderResponse(order);
   }
@@ -224,13 +230,17 @@ export class OrdersService {
   private async loadTradableInstrument(instrumentId: number): Promise<InstrumentRecord> {
     const instrument = await this.instruments.findById(instrumentId);
     if (!instrument) {
-      throw new NotFoundError('INSTRUMENT_NOT_FOUND', `Instrument ${instrumentId} does not exist`, {
-        instrumentId,
-      });
+      throw new NotFoundError(
+        ErrorCode.INSTRUMENT_NOT_FOUND,
+        `Instrument ${instrumentId} does not exist`,
+        {
+          instrumentId,
+        },
+      );
     }
     if (instrument.type === InstrumentType.MONEDA) {
       throw new UnprocessableError(
-        'NOT_TRADABLE',
+        ErrorCode.NOT_TRADABLE,
         `${instrument.ticker} is a currency and cannot be traded; use the cash endpoints for deposits and withdrawals`,
         { instrumentId },
       );
@@ -249,7 +259,7 @@ export class OrdersService {
     const snapshot = await this.marketdata.getLatestPrice(instrument.id);
     if (!snapshot) {
       throw new UnprocessableError(
-        'NO_MARKET_PRICE',
+        ErrorCode.NO_MARKET_PRICE,
         `No market price available for ${instrument.ticker}; a MARKET order cannot be executed`,
         { instrumentId: instrument.id },
       );
@@ -264,14 +274,14 @@ export class OrdersService {
     const size = amount.floorDiv(price);
     if (size < 1) {
       throw new UnprocessableError(
-        'AMOUNT_TOO_SMALL',
+        ErrorCode.AMOUNT_TOO_SMALL,
         `Amount ${amount.toFixed()} does not cover one share at ${price.toFixed()}`,
         { amount: amount.toFixed(), price: price.toFixed() },
       );
     }
     if (size > MAX_ORDER_SIZE) {
       throw new UnprocessableError(
-        'ORDER_TOO_LARGE',
+        ErrorCode.ORDER_TOO_LARGE,
         `Resulting size ${size} exceeds the maximum of ${MAX_ORDER_SIZE}`,
         {
           size,

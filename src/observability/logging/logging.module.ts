@@ -2,17 +2,21 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Module } from '@nestjs/common';
 import { LoggerModule } from 'nestjs-pino';
+import {
+  MAX_REQUEST_ID_LENGTH,
+  REQUEST_ID_HEADER,
+  UNLOGGED_PATH_PREFIXES,
+} from '../../common/http/constants';
 import { AppConfig } from '../../config/app.config';
-
-const REQUEST_ID_HEADER = 'x-request-id';
-const NOISY_PATH_PREFIXES = ['/health', '/metrics'];
 
 /** Honors an incoming X-Request-Id (bounded length) or mints a UUID. */
 export function resolveRequestId(req: IncomingMessage, res: ServerResponse): string {
   const incoming = req.headers[REQUEST_ID_HEADER];
   const candidate = Array.isArray(incoming) ? incoming[0] : incoming;
   const id =
-    typeof candidate === 'string' && candidate.length > 0 && candidate.length <= 128
+    typeof candidate === 'string' &&
+    candidate.length > 0 &&
+    candidate.length <= MAX_REQUEST_ID_LENGTH
       ? candidate
       : randomUUID();
   res.setHeader(REQUEST_ID_HEADER, id);
@@ -29,7 +33,7 @@ export function resolveRequestId(req: IncomingMessage, res: ServerResponse): str
           genReqId: resolveRequestId,
           autoLogging: {
             ignore: (req: IncomingMessage) =>
-              NOISY_PATH_PREFIXES.some((prefix) => (req.url ?? '').startsWith(prefix)),
+              UNLOGGED_PATH_PREFIXES.some((prefix) => (req.url ?? '').startsWith(prefix)),
           },
           redact: {
             paths: ['req.headers.authorization', 'req.headers.cookie'],

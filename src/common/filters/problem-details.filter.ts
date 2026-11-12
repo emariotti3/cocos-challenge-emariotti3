@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AppError } from '../errors/app.error';
+import { ErrorCode } from '../errors/error-codes';
 import { type ProblemDetails, problemTypeFor } from '../errors/problem-details';
 
 /** Everything from here up is logged as a server failure (`statusCode` is a plain number on the wire). */
@@ -19,14 +20,14 @@ const titleFor = (status: number): string => STATUS_CODES[status] ?? 'Error';
 
 /** Stable `code` for framework-raised HttpExceptions that do not carry one. */
 const CODE_BY_STATUS: Partial<Record<HttpStatus, string>> = {
-  [HttpStatus.BAD_REQUEST]: 'BAD_REQUEST',
-  [HttpStatus.NOT_FOUND]: 'ROUTE_NOT_FOUND',
-  [HttpStatus.METHOD_NOT_ALLOWED]: 'METHOD_NOT_ALLOWED',
-  [HttpStatus.PAYLOAD_TOO_LARGE]: 'PAYLOAD_TOO_LARGE',
-  [HttpStatus.UNSUPPORTED_MEDIA_TYPE]: 'UNSUPPORTED_MEDIA_TYPE',
-  [HttpStatus.TOO_MANY_REQUESTS]: 'RATE_LIMITED',
-  [HttpStatus.INTERNAL_SERVER_ERROR]: 'INTERNAL_ERROR',
-  [HttpStatus.SERVICE_UNAVAILABLE]: 'SERVICE_UNAVAILABLE',
+  [HttpStatus.BAD_REQUEST]: ErrorCode.BAD_REQUEST,
+  [HttpStatus.NOT_FOUND]: ErrorCode.ROUTE_NOT_FOUND,
+  [HttpStatus.METHOD_NOT_ALLOWED]: ErrorCode.METHOD_NOT_ALLOWED,
+  [HttpStatus.PAYLOAD_TOO_LARGE]: ErrorCode.PAYLOAD_TOO_LARGE,
+  [HttpStatus.UNSUPPORTED_MEDIA_TYPE]: ErrorCode.UNSUPPORTED_MEDIA_TYPE,
+  [HttpStatus.TOO_MANY_REQUESTS]: ErrorCode.RATE_LIMITED,
+  [HttpStatus.INTERNAL_SERVER_ERROR]: ErrorCode.INTERNAL_ERROR,
+  [HttpStatus.SERVICE_UNAVAILABLE]: ErrorCode.SERVICE_UNAVAILABLE,
 };
 
 /**
@@ -81,7 +82,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
       const code =
         typeof fromBody['code'] === 'string'
           ? fromBody['code']
-          : (CODE_BY_STATUS[status as HttpStatus] ?? 'HTTP_ERROR');
+          : (CODE_BY_STATUS[status as HttpStatus] ?? ErrorCode.HTTP_ERROR);
       const detail =
         typeof body === 'string'
           ? body
@@ -108,12 +109,12 @@ export class ProblemDetailsFilter implements ExceptionFilter {
 
     const status = HttpStatus.INTERNAL_SERVER_ERROR;
     return {
-      type: problemTypeFor('INTERNAL_ERROR'),
+      type: problemTypeFor(ErrorCode.INTERNAL_ERROR),
       title: titleFor(status),
       status,
       detail: 'An unexpected error occurred',
       instance,
-      code: 'INTERNAL_ERROR',
+      code: ErrorCode.INTERNAL_ERROR,
       requestId,
     };
   }
