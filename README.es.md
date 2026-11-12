@@ -14,8 +14,23 @@ El enunciado original está en [`backend-challenge.md`](backend-challenge.md). C
 
 Hay además una [página de resumen](https://claude.ai/artifact/U3Qu9VvY3gs7DziB4Ecf6g) en español con diagramas de secuencia de los flujos principales, el plan por etapas, la estructura del repo y las instrucciones para la colección Postman.
 
+## Por dónde empezar
+
+Si tenés diez minutos, estos archivos concentran la mayor parte del diseño:
+
+| Qué                                                              | Dónde                                                                                                                |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| El test funcional del envío de órdenes que pide el enunciado     | [`test/integration/orders.e2e-spec.ts`](test/integration/orders.e2e-spec.ts) (pipeline HTTP real, Postgres real)     |
+| La regla de aceptación del mercado, como función pura            | [`src/modules/orders/domain/order-decision.ts`](src/modules/orders/domain/order-decision.ts)                         |
+| Efectivo, reservas y disponibilidad derivados del ledger         | [`src/modules/portfolio/portfolio.repository.ts`](src/modules/portfolio/portfolio.repository.ts)                     |
+| Replay de posiciones con costo promedio ponderado                | [`src/modules/portfolio/domain/position-calculator.ts`](src/modules/portfolio/domain/position-calculator.ts)         |
+| El candado por usuario que hace seguras las órdenes concurrentes | [`src/modules/users/users.repository.ts`](src/modules/users/users.repository.ts)                                     |
+| Cada cambio del esquema y su justificación                       | [`src/database/migrations/0002_constraints_and_indexes.ts`](src/database/migrations/0002_constraints_and_indexes.ts) |
+| Cada supuesto, con las alternativas descartadas                  | [`docs/DECISIONS.es.md`](docs/DECISIONS.es.md)                                                                       |
+
 ## Contenido
 
+- [Por dónde empezar](#por-dónde-empezar)
 - [Inicio rápido](#inicio-rápido)
 - [API](#api)
 - [Reglas de negocio en una página](#reglas-de-negocio-en-una-página)
@@ -27,6 +42,7 @@ Hay además una [página de resumen](https://claude.ai/artifact/U3Qu9VvY3gs7DziB
 - [Observabilidad](#observabilidad)
 - [CI](#ci)
 - [Estructura del proyecto](#estructura-del-proyecto)
+- [Notas sobre el esquema provisto](#notas-sobre-el-esquema-provisto)
 
 ## Inicio rápido
 
@@ -104,7 +120,7 @@ POST /api/v1/users/1/orders
 
 ```json
 {
-  "type": "/problems/insufficient-funds",
+  "type": "/problems/amount-too-small",
   "title": "Unprocessable Entity",
   "status": 422,
   "detail": "Amount 900.00 does not cover one share at 925.85",
@@ -156,6 +172,38 @@ flowchart LR
 - **El dinero** nunca es un float: `NUMERIC` sigue siendo string hasta la clase `Money` (decimal.js); las respuestas llevan strings de dos decimales. Los timestamps se guardan y leen en UTC.
 - **Esquema**: el DDL provisto como migración base, luego constraints, únicos, índices (incluido `pg_trgm` para la búsqueda) y la columna `rejection_reason`, aplicados con `umzug` al arrancar el contenedor ([ADR-003](docs/DECISIONS.es.md#adr-003-migraciones-con-umzug-y-endurecimiento-del-esquema)).
 - **Endurecimiento**: entorno validado con zod (falla rápido), helmet, lista de orígenes CORS, rate limiting por IP (más estricto para el envío de órdenes), ids de request, logs JSON estructurados, health checks con Terminus, apagado graceful, contenedor sin root con `HEALTHCHECK`.
+
+### Envío de una orden, paso a paso
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant C as Cliente
+  participant API as OrdersController
+  participant S as OrdersService
+  participant DB as Postgres
+  C->>API: POST /users/1/orders {instrumentId, side, type, size | amount, price?}
+  API->>API: UserExistsGuard (404) · ValidationPipe (400)
+  API->>S: placeOrder(user, dto)
+  S->>DB: instrumento (404 desconocido · 422 NOT_TRADABLE para efectivo)
+  alt MARKET
+    S->>DB: último close (422 NO_MARKET_PRICE si no hay)
+  else LIMIT
+    Note over S: precio = precio del request
+  end
+  Note over S: size = size ?? floor(amount / precio) · 422 AMOUNT_TOO_SMALL si es 0
+  S->>DB: BEGIN · SELECT id FROM users WHERE id = $1 FOR UPDATE
+  Note over S,DB: cualquier otra orden o cancelación de este usuario espera acá
+  S->>DB: efectivo disponible = Σ FILLED − reservas de BUY en NEW
+  opt SELL
+    S->>DB: acciones disponibles = neto FILLED − reservas de SELL en NEW
+  end
+  Note over S: decideOrder → FILLED · NEW · REJECTED (función pura)
+  S->>DB: INSERT orders (status, rejection_reason) · COMMIT
+  S-->>C: 201 {status, size, price, notional, rejectionReason}
+```
+
+La verificación de disponibilidad y el INSERT comparten una transacción bajo el candado de la fila del usuario; eso es lo que hace pasar los dos tests de concurrencia: diez compras simultáneas contra efectivo para seis llenan exactamente seis.
 
 ## Desarrollo local
 
@@ -246,6 +294,8 @@ Métricas expuestas en `/metrics` (**plantillas** de ruta, cardinalidad acotada)
 - `orders_placed_total{status,side,type}`, `orders_rejected_total{reason}`, `orders_cancelled_total`
 - `db_pool_connections{state}` y las métricas por defecto del proceso Node.js (lag del event loop, heap, CPU, GC)
 
+![Dashboard de Grafana "Cocos API" tras una corrida de carga con k6: tasa de requests y latencia p95, órdenes ejecutadas y rechazadas en la última hora, tasa por ruta y percentiles de latencia](docs/grafana-dashboard.png)
+
 El dashboard (`docker/grafana/provisioning/dashboards/cocos-api.json`) muestra tasa de requests por ruta, percentiles de latencia, clases de respuesta, resultados de órdenes y motivos de rechazo, uso del pool y salud del runtime.
 
 Los logs son JSON (pino) con `req.id`; los scrapes de health y métricas no se loguean. Las anomalías del portafolio (posiciones negativas, precios faltantes) se loguean en `warn` con el id del usuario.
@@ -283,7 +333,7 @@ test/
   integration/                             # *.e2e-spec.ts
 k6/                                        # smoke.js, load.js, concurrency.js (+ lib/)
 docker/                                    # Dockerfile, entrypoint, provisioning de prometheus + grafana
-docs/                                      # DECISIONS.md, DECISIONS.es.md, api.http, colección Postman, openapi.json
+docs/                                      # DECISIONS.md (+ .es), TESTING.md, api.http, colección y entorno Postman, openapi.json, grafana-dashboard.png
 ```
 
 ## Notas sobre el esquema provisto

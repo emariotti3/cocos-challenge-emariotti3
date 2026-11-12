@@ -14,8 +14,23 @@ The original statement is in [`backend-challenge.md`](backend-challenge.md). Eve
 
 There is also an [overview page](https://claude.ai/artifact/U3Qu9VvY3gs7DziB4Ecf6g) (in Spanish) with sequence diagrams of the main flows, the stage-by-stage plan, the repository layout and the Postman collection instructions.
 
+## Where to look first
+
+If you have ten minutes, these files carry most of the design:
+
+| What                                                          | Where                                                                                                                |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| The functional test of order placement the challenge asks for | [`test/integration/orders.e2e-spec.ts`](test/integration/orders.e2e-spec.ts) (real HTTP pipeline, real Postgres)     |
+| The market acceptance rule, as a pure function                | [`src/modules/orders/domain/order-decision.ts`](src/modules/orders/domain/order-decision.ts)                         |
+| Cash, reservations and availability derived from the ledger   | [`src/modules/portfolio/portfolio.repository.ts`](src/modules/portfolio/portfolio.repository.ts)                     |
+| Position replay with weighted average cost                    | [`src/modules/portfolio/domain/position-calculator.ts`](src/modules/portfolio/domain/position-calculator.ts)         |
+| The per-user lock that makes concurrent orders safe           | [`src/modules/users/users.repository.ts`](src/modules/users/users.repository.ts)                                     |
+| Every schema change and why                                   | [`src/database/migrations/0002_constraints_and_indexes.ts`](src/database/migrations/0002_constraints_and_indexes.ts) |
+| Every assumption, with the alternatives rejected              | [`docs/DECISIONS.md`](docs/DECISIONS.md)                                                                             |
+
 ## Contents
 
+- [Where to look first](#where-to-look-first)
 - [Quick start](#quick-start)
 - [API](#api)
 - [Business rules in one page](#business-rules-in-one-page)
@@ -27,6 +42,7 @@ There is also an [overview page](https://claude.ai/artifact/U3Qu9VvY3gs7DziB4Ecf
 - [Observability](#observability)
 - [CI](#ci)
 - [Project structure](#project-structure)
+- [Notes on the provided schema](#notes-on-the-provided-schema)
 
 ## Quick start
 
@@ -104,7 +120,7 @@ POST /api/v1/users/1/orders
 
 ```json
 {
-  "type": "/problems/insufficient-funds",
+  "type": "/problems/amount-too-small",
   "title": "Unprocessable Entity",
   "status": 422,
   "detail": "Amount 900.00 does not cover one share at 925.85",
@@ -156,6 +172,38 @@ flowchart LR
 - **Money** is never a float: `NUMERIC` stays a string until the `Money` class (decimal.js); responses carry 2-decimal strings. Timestamps are stored and read as UTC.
 - **Schema**: the provided DDL as baseline migration, then constraints, uniques, indexes (including `pg_trgm` for search) and a `rejection_reason` column, applied with `umzug` on container start ([ADR-003](docs/DECISIONS.md#adr-003-migrations-with-umzug-and-schema-hardening)).
 - **Hardening**: zod-validated env (fail fast), helmet, CORS allow-list, per-IP rate limiting (stricter for order placement), request ids, structured JSON logs, Terminus health checks, graceful shutdown, non-root container with `HEALTHCHECK`.
+
+### Placing an order, step by step
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant C as Client
+  participant API as OrdersController
+  participant S as OrdersService
+  participant DB as Postgres
+  C->>API: POST /users/1/orders {instrumentId, side, type, size | amount, price?}
+  API->>API: UserExistsGuard (404) · ValidationPipe (400)
+  API->>S: placeOrder(user, dto)
+  S->>DB: instrument (404 unknown · 422 NOT_TRADABLE for cash)
+  alt MARKET
+    S->>DB: latest close (422 NO_MARKET_PRICE if none)
+  else LIMIT
+    Note over S: price = request price
+  end
+  Note over S: size = size ?? floor(amount / price) · 422 AMOUNT_TOO_SMALL if 0
+  S->>DB: BEGIN · SELECT id FROM users WHERE id = $1 FOR UPDATE
+  Note over S,DB: every other order or cancel of this user waits here
+  S->>DB: available cash = Σ FILLED − NEW BUY reservations
+  opt SELL
+    S->>DB: available shares = net FILLED − NEW SELL reservations
+  end
+  Note over S: decideOrder → FILLED · NEW · REJECTED (pure function)
+  S->>DB: INSERT orders (status, rejection_reason) · COMMIT
+  S-->>C: 201 {status, size, price, notional, rejectionReason}
+```
+
+The availability check and the insert share one transaction under the user's row lock, which is what makes the two concurrency tests pass: ten simultaneous buys against cash for six fill exactly six.
 
 ## Local development
 
@@ -246,6 +294,8 @@ Metrics exposed at `/metrics` (route **templates**, bounded cardinality):
 - `orders_placed_total{status,side,type}`, `orders_rejected_total{reason}`, `orders_cancelled_total`
 - `db_pool_connections{state}` and the default Node.js process metrics (event loop lag, heap, CPU, GC)
 
+![Grafana dashboard "Cocos API" after a k6 load run: request rate and p95 latency tiles, orders filled and rejected in the last hour, request rate by route and latency percentiles](docs/grafana-dashboard.png)
+
 The dashboard (`docker/grafana/provisioning/dashboards/cocos-api.json`) shows request rate by route, latency percentiles, response classes, order outcomes and rejection reasons, pool usage and runtime health.
 
 Logs are JSON (pino) with `req.id`; health and metrics scrapes are not logged. Portfolio anomalies (negative positions, missing prices) are logged at `warn` with the user id.
@@ -283,7 +333,7 @@ test/
   integration/                             # *.e2e-spec.ts
 k6/                                        # smoke.js, load.js, concurrency.js (+ lib/)
 docker/                                    # Dockerfile, entrypoint, prometheus + grafana provisioning
-docs/                                      # DECISIONS.md, api.http, Postman collection, openapi.json
+docs/                                      # DECISIONS.md (+ .es), TESTING.md, api.http, Postman collection + environment, openapi.json, grafana-dashboard.png
 ```
 
 ## Notes on the provided schema
