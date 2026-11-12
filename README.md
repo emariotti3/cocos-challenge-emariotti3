@@ -8,9 +8,9 @@
 
 Versión en español: [README.es.md](README.es.md).
 
-REST API for a brokerage account: **portfolio valuation**, **instrument search** and **order placement** (MARKET / LIMIT, with cancellation) and **cash deposits / withdrawals** on top of the provided Postgres schema. Built as a production-style service: validated configuration, migrations, structured logs, RFC 7807 errors, rate limiting, health checks, Prometheus metrics with a Grafana dashboard, unit + integration + load tests, and a CI pipeline.
+REST API for a brokerage account: **portfolio valuation**, **instrument search** and **order placement** (MARKET / LIMIT, with cancellation) and **cash deposits / withdrawals** on top of the provided Postgres schema. Built as a production-style service: validated configuration, migrations, structured logs, errors in the RFC 7807 problem+json format (a standard shape for HTTP error bodies), rate limiting, health checks, Prometheus metrics with a Grafana dashboard, unit + integration + load tests, and a continuous integration (CI) pipeline.
 
-The original statement is in [`backend-challenge.md`](backend-challenge.md). Every assumption and design choice is documented in [`docs/DECISIONS.md`](docs/DECISIONS.md) (also in Spanish: [`docs/DECISIONS.es.md`](docs/DECISIONS.es.md)).
+The original statement is in [`backend-challenge.md`](backend-challenge.md). Every assumption and design choice is documented as Architecture Decision Records (ADR: one short numbered note per decision, with its context, the choice made, its consequences and the alternatives rejected) in [`docs/DECISIONS.md`](docs/DECISIONS.md) (also in Spanish: [`docs/DECISIONS.es.md`](docs/DECISIONS.es.md)).
 
 There is also an [overview page](https://claude.ai/artifact/U3Qu9VvY3gs7DziB4Ecf6g) (in Spanish) with sequence diagrams of the main flows, the stage-by-stage plan, the repository layout and the Postman collection instructions.
 
@@ -69,7 +69,7 @@ Base path `/api/v1`. Money values are **decimal strings with two decimals** in A
 | ------ | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET`  | `/instruments?q=&ticker=&name=&page=&limit=`                       | Search by ticker and/or name (case-insensitive, partial, trigram-ranked). Returns last price and daily return. No filter = full tradable list.     |
 | `GET`  | `/instruments/:id`                                                 | One instrument with its latest price.                                                                                                              |
-| `GET`  | `/users/:userId/portfolio`                                         | Total account value, cash (`total`, `reserved`, `available`) and positions with market value, average cost, P&L and returns.                       |
+| `GET`  | `/users/:userId/portfolio`                                         | Total account value, cash (`total`, `reserved`, `available`) and positions with market value, average cost, profit and loss (P&L) and returns.     |
 | `POST` | `/users/:userId/orders`                                            | Place an order. Returns `201` with status `FILLED`, `NEW` **or `REJECTED`** (rejected orders are persisted, as required).                          |
 | `POST` | `/users/:userId/orders/:orderId/cancel`                            | Cancel a `NEW` order (`409` otherwise).                                                                                                            |
 | `POST` | `/users/:userId/cash/deposits`                                     | Deposit whole ARS. Recorded as a `FILLED` order with side `CASH_IN` on the `ARS` instrument (`price 1`, `size = amount`).                          |
@@ -202,10 +202,10 @@ flowchart LR
   OS --> MET[MetricsService] -.-> PROM[Prometheus] -.-> GRAF[Grafana]
 ```
 
-- **NestJS 11 modular monolith**, TypeScript strict. Controllers translate HTTP; services hold use cases; repositories are the only classes that touch **Sequelize** (models for CRUD, raw SQL with bind parameters for the ledger aggregates).
+- **NestJS 11 modular monolith**, TypeScript strict. Controllers translate HTTP; services hold use cases; repositories are the only classes that touch **Sequelize** (models for simple reads and writes, raw SQL with bind parameters for the ledger aggregates).
 - **Money** is never a float: `NUMERIC` stays a string until the `Money` class (decimal.js); responses carry 2-decimal strings. Timestamps are stored and read as UTC.
-- **Schema**: the provided DDL as baseline migration, then constraints, uniques, indexes (including `pg_trgm` for search) and a `rejection_reason` column, applied with `umzug` on container start ([ADR-003](docs/DECISIONS.md#adr-003-migrations-with-umzug-and-schema-hardening)).
-- **Hardening**: zod-validated env (fail fast), helmet, CORS allow-list, per-IP rate limiting (stricter for order placement), request ids, structured JSON logs, Terminus health checks, graceful shutdown, non-root container with `HEALTHCHECK`.
+- **Schema**: the provided DDL (the SQL table definitions in `database.sql`) as baseline migration, then constraints, uniques, indexes (including `pg_trgm` for search) and a `rejection_reason` column, applied with `umzug` on container start ([ADR-003](docs/DECISIONS.md#adr-003-migrations-with-umzug-and-schema-hardening)).
+- **Hardening**: zod-validated env (fail fast), helmet security headers, CORS (cross-origin) allow-list, per-IP rate limiting (stricter for order placement), request ids, structured JSON logs, Terminus health checks, graceful shutdown, non-root container with `HEALTHCHECK`.
 
 ### Placing an order, step by step
 
@@ -292,7 +292,7 @@ All variables are validated at boot (`src/config/env.schema.ts`); invalid values
 | ---------------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Unit (`src/**/*.spec.ts`)                      | Jest                                  | Pure domain logic: `Money`, position replay and average cost, order decision rule, validators, services with mocked repositories                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Integration (`test/integration/*.e2e-spec.ts`) | Jest + Supertest + **Testcontainers** | The real HTTP pipeline against a disposable Postgres 16 with the real migrations and seed. Includes the challenge's **functional test of order placement** (27 scenarios: fills, reservations, rejections persisted as `REJECTED`, every validation path, cancellation, pagination, and two **concurrency** tests proving no overdraft), **18 cash scenarios** (deposits, withdrawals against available cash, rejections persisted, cash sides refused on the orders endpoint, concurrent withdrawals and withdrawals racing buys), the portfolio asserted verbatim against the seed, search and operational endpoints |
-| Load / correctness                             | k6                                    | Smoke, ramping load with latency thresholds, and a 50-VU simultaneous-buy burst asserting the account never goes negative                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Load / correctness                             | k6                                    | Smoke, ramping load with latency thresholds, and a burst of 50 virtual users (VUs) buying simultaneously asserting the account never goes negative                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 ```bash
 npm test               # ~10 s
@@ -326,7 +326,7 @@ Metrics exposed at `/metrics` (route **templates**, bounded cardinality):
 
 - `http_server_request_duration_seconds{method,route,status_code}` histogram, `http_server_requests_in_flight`
 - `orders_placed_total{status,side,type}`, `orders_rejected_total{reason}`, `orders_cancelled_total`
-- `db_pool_connections{state}` and the default Node.js process metrics (event loop lag, heap, CPU, GC)
+- `db_pool_connections{state}` and the default Node.js process metrics (event loop lag, heap, CPU, garbage collection)
 
 ![Grafana dashboard "Cocos API" after a k6 load run: request rate and p95 latency tiles, orders filled and rejected in the last hour, request rate by route and latency percentiles](docs/grafana-dashboard.png)
 
@@ -352,7 +352,7 @@ src/
   main.ts, app.module.ts, app.setup.ts     # bootstrap and the shared HTTP pipeline (also used by tests)
   config/                                  # zod env schema + typed AppConfig
   common/                                  # errors, problem+json filter, Money, pagination cursor, validators, throttling, operation logging
-  database/                                # Sequelize module, models, umzug migrations + seeders, CLI, pg type parsers
+  database/                                # Sequelize module, models, umzug migrations + seeders, command-line tool, pg type parsers
   health/                                  # Terminus liveness / readiness
   observability/                           # pino logging module, Prometheus metrics module
   modules/

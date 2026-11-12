@@ -1,6 +1,6 @@
 # Design decisions and assumptions
 
-Architecture Decision Records for the Cocos backend challenge. Each entry states the context, the decision, its consequences and the alternatives considered. Numbers quoted for "user 1" refer to the dataset shipped in `database.sql`. Spanish version: [DECISIONS.es.md](DECISIONS.es.md).
+Architecture Decision Records (ADR) for the Cocos backend challenge: one short numbered note per decision. Each entry states the context, the decision, its consequences and the alternatives considered. Numbers quoted for "user 1" refer to the dataset shipped in `database.sql`. Spanish version: [DECISIONS.es.md](DECISIONS.es.md).
 
 ## ADR-001 NestJS modular monolith
 
@@ -14,7 +14,7 @@ Architecture Decision Records for the Cocos backend challenge. Each entry states
 
 ## ADR-002 Sequelize behind repositories, raw SQL for aggregates
 
-**Context.** The team is fluent in Sequelize. The heavy queries (cash balance, positions, availability) are aggregates over `orders` that an ORM query builder expresses poorly.
+**Context.** The team is fluent in Sequelize. The heavy queries (cash balance, positions, availability) are aggregates over `orders` that an ORM (object-relational mapper) query builder expresses poorly.
 
 **Decision.** Sequelize v6 with `sequelize-typescript` models for the four tables; all access goes through repository classes. Aggregates use `sequelize.query` with **bind parameters** (`$name`) and typed row mappers. Services depend on repositories, never on models, so the ORM is swappable.
 
@@ -28,11 +28,11 @@ Architecture Decision Records for the Cocos backend challenge. Each entry states
 
 **Decision.** Three ordered steps run by `umzug` (TypeScript in dev, compiled JS in the image, same history rows):
 
-1. `0001_baseline`: the provided DDL verbatim. Identifiers stay unquoted, so Postgres folds them to lowercase (`instrumentid`, `userid`, `accountnumber`, `previousclose`). Models map those column names explicitly.
+1. `0001_baseline`: the provided DDL (SQL table definitions) verbatim. Identifiers stay unquoted, so Postgres folds them to lowercase (`instrumentid`, `userid`, `accountnumber`, `previousclose`). Models map those column names explicitly.
 2. `0002_constraints_and_indexes`:
    - `NOT NULL` on all business columns and `CHECK` constraints on `side`, `type`, `status`, `size > 0`, `price >= 0`: invalid rows cannot be persisted even by a buggy writer.
    - `UNIQUE (instruments.ticker)`, `UNIQUE (users.accountnumber)`, `UNIQUE (marketdata.instrumentid, date)`.
-   - `orders (userid, status, instrumentid)`: serves the cash summary, the position replay and the per-instrument availability check. `orders (userid, datetime DESC, id DESC)`: order history with keyset pagination. `marketdata (instrumentid, date DESC)`: latest price per instrument via `DISTINCT ON`. GIN trigram indexes on `instruments.ticker` and `name` for `ILIKE '%term%'` search (the planner uses a sequential scan on 66 rows, the index pays off at real catalogue sizes).
+   - `orders (userid, status, instrumentid)`: serves the cash summary, the position replay and the per-instrument availability check. `orders (userid, datetime DESC, id DESC)`: order history with keyset pagination. `marketdata (instrumentid, date DESC)`: latest price per instrument via `DISTINCT ON`. GIN (generalized inverted) trigram indexes on `instruments.ticker` and `name` for `ILIKE '%term%'` search (the planner uses a sequential scan on 66 rows, the index pays off at real catalogue sizes).
    - `orders.datetime DEFAULT now()`.
    - New nullable column `orders.rejection_reason`: a REJECTED row should say why (`INSUFFICIENT_FUNDS` / `INSUFFICIENT_SHARES`) for support and auditing.
 3. Seed (`0001_challenge_dataset`, separate history table): the INSERT block from `database.sql`, copied verbatim, idempotent, skippable with `RUN_SEED=false`.
@@ -77,7 +77,7 @@ For user 1: total 753,000.00, reserved 125,500.00 (50 x 710 + 60 x 1500), availa
 - `dailyReturnPct = (close - previousClose) / previousClose * 100` (from the latest `marketdata` row)
 - `totalValue = cash.total + sum(marketValue)`
 
-Realized P&L is intentionally out of scope. FIFO would also be defensible; weighted average is what most Argentine brokers display and is simpler to explain.
+Realized profit and loss (P&L) is intentionally out of scope. FIFO would also be defensible; weighted average is what most Argentine brokers display and is simpler to explain.
 
 ## ADR-008 Order sizing and validation rules
 
@@ -107,11 +107,13 @@ Realized P&L is intentionally out of scope. FIFO would also be defensible; weigh
 
 ## ADR-011 User identification without authentication
 
-**Decision.** Authentication is out of scope, so the user is a path parameter: `/users/:userId/portfolio`, `/users/:userId/orders`. A guard validates the id, loads the user once (404 `USER_NOT_FOUND`) and attaches it to the request. Replacing the guard with a JWT guard that populates `request.user` is the intended upgrade; controllers do not change.
+**Decision.** Authentication is out of scope, so the user is a path parameter: `/users/:userId/portfolio`, `/users/:userId/orders`. A guard validates the id, loads the user once (404 `USER_NOT_FOUND`) and attaches it to the request. Replacing the guard with a JWT (JSON Web Token) guard that populates `request.user` is the intended upgrade; controllers do not change.
 
 **Alternatives.** `X-User-Id` header (less discoverable in Swagger and REST clients).
 
 ## ADR-012 Errors as RFC 7807 problem+json
+
+RFC 7807 ("Problem Details for HTTP APIs") is the internet standard that defines the `application/problem+json` error body used here.
 
 **Decision.** Every error, including validation and unhandled ones, is rendered by one filter as `application/problem+json` with `type`, `title`, `status`, `detail`, `instance`, a stable machine-readable `code` (`INSUFFICIENT_FUNDS`, `ORDER_NOT_CANCELLABLE`, ...) and the `requestId`. Unexpected errors are logged with the stack and returned as a generic 500 that never leaks SQL or internals.
 
@@ -122,7 +124,7 @@ Realized P&L is intentionally out of scope. FIFO would also be defensible; weigh
 ## ADR-014 Operational endpoints and hardening
 
 - `/health/live` (process up), `/health/ready` (database ping) via Terminus; `/metrics` (Prometheus) and `/docs` (Swagger) live outside the `/api/v1` prefix and are excluded from rate limiting.
-- `helmet`, CORS allow-list from env, request body limit, `trust proxy`.
+- `helmet`, CORS (cross-origin) allow-list from env, request body limit, `trust proxy`.
 - Rate limiting per IP: 100 requests/min by default, 20/min for order placement and cancellation; disabled in tests and load runs through `RATE_LIMIT_ENABLED=false`. `429` responses carry `Retry-After`.
 - Structured JSON logs (pino) with a request id (`X-Request-Id` honored or generated, echoed back). Health and metrics scrapes are not logged.
 - Graceful shutdown through Nest shutdown hooks; the container runs as the unprivileged `node` user with a `HEALTHCHECK`.
@@ -132,8 +134,8 @@ Realized P&L is intentionally out of scope. FIFO would also be defensible; weigh
 
 - **Unit** (Jest): pure domain functions (`Money`, position replay, order decision, validators) and services with mocked repositories.
 - **Integration** (Jest + Supertest + Testcontainers): the real HTTP pipeline against a disposable Postgres 16 with the real migrations and seed; covers the challenge-mandated functional test of order placement (27 scenarios including concurrency), portfolio totals (asserted verbatim against the seed), search, health and error shapes. The `orders` table is restored to the seed between tests.
-- **Load / correctness** (k6): `smoke`, `load` (ramping to 50 VUs with thresholds) and `concurrency` (50 simultaneous buys against a seeded account; asserts no overdraft). Thresholds are regression guards calibrated for a laptop, not SLOs.
-- **Coverage**: unit and integration projects run together; CI fails below 85% statements/functions/lines and 80% branches.
+- **Load / correctness** (k6): `smoke`, `load` (ramping to 50 virtual users (VUs) with thresholds) and `concurrency` (50 simultaneous buys against a seeded account; asserts no overdraft). Thresholds are regression guards calibrated for a laptop, not SLOs.
+- **Coverage**: unit and integration projects run together; continuous integration (CI) fails below 85% statements/functions/lines and 80% branches.
 
 ## ADR-016 Observability
 
@@ -147,7 +149,7 @@ Realized P&L is intentionally out of scope. FIFO would also be defensible; weigh
 
 **Decision.** `POST /users/:userId/cash/deposits` and `POST /users/:userId/cash/withdrawals` (`{ amount }`, whole ARS) insert exactly that row: instrument `ARS`, type `MARKET`, `price 1.00`, `size = amount`. Deposits settle as `FILLED`. Withdrawals are checked against _available_ cash (total minus pending LIMIT BUY reservations, ADR-005) and, like market rejections (ADR-009), an insufficient withdrawal is persisted as `REJECTED` with `INSUFFICIENT_FUNDS` and returned with 201. Both run inside `UsersRepository.withLock`, the same per-user row lock as order placement (ADR-010), so a withdrawal and a MARKET BUY racing for the same pesos are serialized and only one can win.
 
-Cash sides are deliberately **not** reachable through `POST /orders`: the DTO accepts only `BUY` / `SELL` (400 with a message pointing at the cash endpoints) and the `ARS` instrument itself is `422 NOT_TRADABLE`, so there is no way to mint cash with a trade. Transfers and trades share the ledger table but are different operations: different validation (an amount, no instrument, no price), different authorization in a real broker (a transfer is confirmed by a payment rail or the back office, not by the trading UI) and different rate limits. The stored row is indistinguishable from the seed's, so the portfolio needs no special case and transfers appear in the order history filtered with `side=CASH_IN|CASH_OUT`.
+Cash sides are deliberately **not** reachable through `POST /orders`: the DTO (data transfer object: the validated request body) accepts only `BUY` / `SELL` (400 with a message pointing at the cash endpoints) and the `ARS` instrument itself is `422 NOT_TRADABLE`, so there is no way to mint cash with a trade. Transfers and trades share the ledger table but are different operations: different validation (an amount, no instrument, no price), different authorization in a real broker (a transfer is confirmed by a payment rail or the back office, not by the trading UI) and different rate limits. The stored row is indistinguishable from the seed's, so the portfolio needs no special case and transfers appear in the order history filtered with `side=CASH_IN|CASH_OUT`.
 
 **Consequences.** Amounts are whole pesos because `size` is an `INTEGER` column; supporting cents would mean `size = 1, price = amount` (bounded by `NUMERIC(10,2)`) and breaking the dataset's convention. A transfer is never `NEW`, so it can never be cancelled (409 like any FILLED/REJECTED order). In production these endpoints would be driven by a payment provider's confirmations with an idempotency key rather than called by the client directly.
 

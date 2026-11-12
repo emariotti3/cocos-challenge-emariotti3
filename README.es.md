@@ -8,9 +8,9 @@
 
 English version: [README.md](README.md).
 
-API REST para una cuenta comitente: **valuación del portafolio**, **búsqueda de instrumentos** y **envío de órdenes** (MARKET / LIMIT, con cancelación) y **depósitos / retiros de efectivo** sobre el esquema Postgres provisto. Construida como un servicio de producción: configuración validada, migraciones, logs estructurados, errores RFC 7807, rate limiting, health checks, métricas Prometheus con dashboard en Grafana, tests unitarios + de integración + de carga, y pipeline de CI.
+API REST para una cuenta comitente: **valuación del portafolio**, **búsqueda de instrumentos** y **envío de órdenes** (MARKET / LIMIT, con cancelación) y **depósitos / retiros de efectivo** sobre el esquema Postgres provisto. Construida como un servicio de producción: configuración validada, migraciones, logs estructurados, errores en formato RFC 7807 problem+json (un estándar para cuerpos de error HTTP), rate limiting, health checks, métricas Prometheus con dashboard en Grafana, tests unitarios + de integración + de carga, y pipeline de integración continua (CI).
 
-El enunciado original está en [`backend-challenge.md`](backend-challenge.md). Cada supuesto y decisión de diseño está documentado en [`docs/DECISIONS.es.md`](docs/DECISIONS.es.md) (también en inglés: [`docs/DECISIONS.md`](docs/DECISIONS.md)).
+El enunciado original está en [`backend-challenge.md`](backend-challenge.md). Cada supuesto y decisión de diseño está documentado como registros de decisiones de arquitectura (ADR, por sus siglas en inglés: una nota corta y numerada por decisión, con su contexto, la elección tomada, sus consecuencias y las alternativas descartadas) en [`docs/DECISIONS.es.md`](docs/DECISIONS.es.md) (también en inglés: [`docs/DECISIONS.md`](docs/DECISIONS.md)).
 
 Hay además una [página de resumen](https://claude.ai/artifact/U3Qu9VvY3gs7DziB4Ecf6g) en español con diagramas de secuencia de los flujos principales, el plan por etapas, la estructura del repo y las instrucciones para la colección Postman.
 
@@ -69,7 +69,7 @@ Ruta base `/api/v1`. Los valores monetarios son **strings decimales con dos deci
 | ------ | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `GET`  | `/instruments?q=&ticker=&name=&page=&limit=`                       | Búsqueda por ticker y/o nombre (sin distinguir mayúsculas, parcial, ordenada por similitud trigram). Devuelve último precio y retorno diario. Sin filtro = listado completo de instrumentos operables. |
 | `GET`  | `/instruments/:id`                                                 | Un instrumento con su último precio.                                                                                                                                                                   |
-| `GET`  | `/users/:userId/portfolio`                                         | Valor total de la cuenta, efectivo (`total`, `reserved`, `available`) y posiciones con valor de mercado, costo promedio, P&L y rendimientos.                                                           |
+| `GET`  | `/users/:userId/portfolio`                                         | Valor total de la cuenta, efectivo (`total`, `reserved`, `available`) y posiciones con valor de mercado, costo promedio, resultado (P&L, ganancia o pérdida) y rendimientos.                           |
 | `POST` | `/users/:userId/orders`                                            | Envía una orden. Devuelve `201` con estado `FILLED`, `NEW` **o `REJECTED`** (las rechazadas se persisten, como pide el enunciado).                                                                     |
 | `POST` | `/users/:userId/orders/:orderId/cancel`                            | Cancela una orden `NEW` (`409` en otro caso).                                                                                                                                                          |
 | `POST` | `/users/:userId/cash/deposits`                                     | Deposita pesos enteros. Se registra como una orden `FILLED` con side `CASH_IN` sobre el instrumento `ARS` (`price 1`, `size = amount`).                                                                |
@@ -202,10 +202,10 @@ flowchart LR
   OS --> MET[MetricsService] -.-> PROM[Prometheus] -.-> GRAF[Grafana]
 ```
 
-- **Monolito modular en NestJS 11**, TypeScript strict. Los controladores traducen HTTP; los servicios contienen los casos de uso; los repositorios son las únicas clases que tocan **Sequelize** (modelos para CRUD, SQL crudo con bind parameters para los agregados del ledger).
+- **Monolito modular en NestJS 11**, TypeScript strict. Los controladores traducen HTTP; los servicios contienen los casos de uso; los repositorios son las únicas clases que tocan **Sequelize** (modelos para lecturas y escrituras simples, SQL crudo con bind parameters para los agregados del ledger).
 - **El dinero** nunca es un float: `NUMERIC` sigue siendo string hasta la clase `Money` (decimal.js); las respuestas llevan strings de dos decimales. Los timestamps se guardan y leen en UTC.
-- **Esquema**: el DDL provisto como migración base, luego constraints, únicos, índices (incluido `pg_trgm` para la búsqueda) y la columna `rejection_reason`, aplicados con `umzug` al arrancar el contenedor ([ADR-003](docs/DECISIONS.es.md#adr-003-migraciones-con-umzug-y-endurecimiento-del-esquema)).
-- **Endurecimiento**: entorno validado con zod (falla rápido), helmet, lista de orígenes CORS, rate limiting por IP (más estricto para el envío de órdenes), ids de request, logs JSON estructurados, health checks con Terminus, apagado graceful, contenedor sin root con `HEALTHCHECK`.
+- **Esquema**: el DDL provisto (las definiciones SQL de tablas de `database.sql`) como migración base, luego constraints, únicos, índices (incluido `pg_trgm` para la búsqueda) y la columna `rejection_reason`, aplicados con `umzug` al arrancar el contenedor ([ADR-003](docs/DECISIONS.es.md#adr-003-migraciones-con-umzug-y-endurecimiento-del-esquema)).
+- **Endurecimiento**: entorno validado con zod (falla rápido), cabeceras de seguridad con helmet, lista de orígenes CORS (acceso entre dominios), rate limiting por IP (más estricto para el envío de órdenes), ids de request, logs JSON estructurados, health checks con Terminus, apagado graceful, contenedor sin root con `HEALTHCHECK`.
 
 ### Envío de una orden, paso a paso
 
@@ -292,7 +292,7 @@ Todas las variables se validan al arrancar (`src/config/env.schema.ts`); un valo
 | ---------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Unitarios (`src/**/*.spec.ts`)                 | Jest                                  | Lógica de dominio pura: `Money`, replay de posiciones y costo promedio, regla de decisión de órdenes, validadores, servicios con repositorios simulados                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Integración (`test/integration/*.e2e-spec.ts`) | Jest + Supertest + **Testcontainers** | El pipeline HTTP real contra un Postgres 16 descartable con las migraciones y el seed reales. Incluye el **test funcional del envío de órdenes** exigido por el enunciado (27 escenarios: fills, reservas, rechazos persistidos como `REJECTED`, cada camino de validación, cancelación, paginación y dos tests de **concurrencia** que prueban que no hay sobregiro), **18 escenarios de efectivo** (depósitos, retiros contra el disponible, rechazos persistidos, sides de efectivo rechazados en el endpoint de órdenes, retiros concurrentes y retiros compitiendo con compras), el portafolio comparado literalmente contra el seed, búsqueda y endpoints operativos |
-| Carga / corrección                             | k6                                    | Smoke, carga en rampa con umbrales de latencia, y una ráfaga de 50 VUs comprando a la vez que verifica que la cuenta nunca queda en negativo                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Carga / corrección                             | k6                                    | Smoke, carga en rampa con umbrales de latencia, y una ráfaga de 50 usuarios virtuales (VUs) comprando a la vez que verifica que la cuenta nunca queda en negativo                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 ```bash
 npm test               # ~10 s
@@ -326,7 +326,7 @@ Métricas expuestas en `/metrics` (**plantillas** de ruta, cardinalidad acotada)
 
 - Histograma `http_server_request_duration_seconds{method,route,status_code}`, `http_server_requests_in_flight`
 - `orders_placed_total{status,side,type}`, `orders_rejected_total{reason}`, `orders_cancelled_total`
-- `db_pool_connections{state}` y las métricas por defecto del proceso Node.js (lag del event loop, heap, CPU, GC)
+- `db_pool_connections{state}` y las métricas por defecto del proceso Node.js (lag del event loop, heap, CPU, recolección de basura)
 
 ![Dashboard de Grafana "Cocos API" tras una corrida de carga con k6: tasa de requests y latencia p95, órdenes ejecutadas y rechazadas en la última hora, tasa por ruta y percentiles de latencia](docs/grafana-dashboard.png)
 
@@ -352,7 +352,7 @@ src/
   main.ts, app.module.ts, app.setup.ts     # bootstrap y pipeline HTTP compartido (también lo usan los tests)
   config/                                  # esquema zod del entorno + AppConfig tipado
   common/                                  # errores, filtro problem+json, Money, cursor de paginación, validadores, throttling, logging de operaciones
-  database/                                # módulo Sequelize, modelos, migraciones y seeders umzug, CLI, parsers de tipos pg
+  database/                                # módulo Sequelize, modelos, migraciones y seeders umzug, herramienta de línea de comandos, parsers de tipos pg
   health/                                  # liveness / readiness con Terminus
   observability/                           # módulo de logging pino, módulo de métricas Prometheus
   modules/
