@@ -6,9 +6,13 @@
 ![Postgres 16](https://img.shields.io/badge/Postgres-16-4169E1?logo=postgresql&logoColor=white)
 ![Coverage thresholds](https://img.shields.io/badge/coverage-%E2%89%A585%25%20enforced-brightgreen)
 
+Versión en español: [README.es.md](README.es.md).
+
 REST API for a brokerage account: **portfolio valuation**, **instrument search** and **order placement** (MARKET / LIMIT, with cancellation) on top of the provided Postgres schema. Built as a production-style service: validated configuration, migrations, structured logs, RFC 7807 errors, rate limiting, health checks, Prometheus metrics with a Grafana dashboard, unit + integration + load tests, and a CI pipeline.
 
 The original statement is in [`backend-challenge.md`](backend-challenge.md). Every assumption and design choice is documented in [`docs/DECISIONS.md`](docs/DECISIONS.md) (also in Spanish: [`docs/DECISIONS.es.md`](docs/DECISIONS.es.md)).
+
+There is also an [overview page](https://claude.ai/artifact/U3Qu9VvY3gs7DziB4Ecf6g) (in Spanish) with sequence diagrams of the main flows, the stage-by-stage plan, the repository layout and the Postman collection instructions.
 
 ## Contents
 
