@@ -1,0 +1,14 @@
+node_modules
+dist
+coverage
+k6/results
+.git
+.github
+.env
+.env.*
+*.md
+!README.md
+docs
+docker/grafana
+docker/prometheus
+IMPLEMENTATION_PLAN.md
