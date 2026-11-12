@@ -99,6 +99,8 @@ jobs:
         run: docker compose up -d --no-build
         env:
           API_IMAGE: cocos-api:ci
+          # the smoke script places ~4 ledger mutations per second from one IP; the 20/min budget would 429 it
+          RATE_LIMIT_ENABLED: 'false'
       - name: Wait for readiness
         run: |
           for i in $(seq 1 30); do
