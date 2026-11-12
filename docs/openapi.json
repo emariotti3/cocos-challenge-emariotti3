@@ -380,6 +380,104 @@
           "orders"
         ]
       }
+    },
+    "/api/v1/users/{userId}/cash/deposits": {
+      "post": {
+        "description": "Records an incoming transfer as a FILLED order with side CASH_IN on the ARS instrument (price 1, size = amount). Settles immediately.",
+        "operationId": "CashController_deposit_v1",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "example": 1,
+              "type": "number"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashMovementDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "CASH_IN order, status FILLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "404": {
+            "description": "USER_NOT_FOUND"
+          }
+        },
+        "summary": "Deposit cash (CASH_IN)",
+        "tags": [
+          "cash"
+        ]
+      }
+    },
+    "/api/v1/users/{userId}/cash/withdrawals": {
+      "post": {
+        "description": "Records an outgoing transfer as an order with side CASH_OUT. Checked against *available* cash (total minus pending LIMIT BUY reservations) under the same per-user lock as order placement. Insufficient cash is persisted as REJECTED and still returns 201.",
+        "operationId": "CashController_withdraw_v1",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "example": 1,
+              "type": "number"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashMovementDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "CASH_OUT order, status FILLED or REJECTED (INSUFFICIENT_FUNDS)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "404": {
+            "description": "USER_NOT_FOUND"
+          }
+        },
+        "summary": "Withdraw cash (CASH_OUT)",
+        "tags": [
+          "cash"
+        ]
+      }
     }
   },
   "info": {
@@ -400,6 +498,10 @@
     {
       "name": "orders",
       "description": "Order placement, cancellation and history"
+    },
+    {
+      "name": "cash",
+      "description": "Deposits (CASH_IN) and withdrawals (CASH_OUT)"
     }
   ],
   "servers": [],
@@ -713,7 +815,8 @@
               "BUY",
               "SELL"
             ],
-            "example": "BUY"
+            "example": "BUY",
+            "description": "Only BUY and SELL are accepted here. Cash transfers (CASH_IN / CASH_OUT) are recorded through POST /users/:userId/cash/deposits and /withdrawals."
           },
           "type": {
             "type": "string",
@@ -867,6 +970,21 @@
         "required": [
           "data",
           "meta"
+        ]
+      },
+      "CashMovementDto": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "number",
+            "example": 100000,
+            "minimum": 1,
+            "maximum": 2000000000,
+            "description": "Whole ARS to move (integer)"
+          }
+        },
+        "required": [
+          "amount"
         ]
       }
     }

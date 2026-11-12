@@ -8,7 +8,7 @@
 
 English version: [README.md](README.md).
 
-API REST para una cuenta comitente: **valuación del portafolio**, **búsqueda de instrumentos** y **envío de órdenes** (MARKET / LIMIT, con cancelación) sobre el esquema Postgres provisto. Construida como un servicio de producción: configuración validada, migraciones, logs estructurados, errores RFC 7807, rate limiting, health checks, métricas Prometheus con dashboard en Grafana, tests unitarios + de integración + de carga, y pipeline de CI.
+API REST para una cuenta comitente: **valuación del portafolio**, **búsqueda de instrumentos** y **envío de órdenes** (MARKET / LIMIT, con cancelación) y **depósitos / retiros de efectivo** sobre el esquema Postgres provisto. Construida como un servicio de producción: configuración validada, migraciones, logs estructurados, errores RFC 7807, rate limiting, health checks, métricas Prometheus con dashboard en Grafana, tests unitarios + de integración + de carga, y pipeline de CI.
 
 El enunciado original está en [`backend-challenge.md`](backend-challenge.md). Cada supuesto y decisión de diseño está documentado en [`docs/DECISIONS.es.md`](docs/DECISIONS.es.md) (también en inglés: [`docs/DECISIONS.md`](docs/DECISIONS.md)).
 
@@ -72,6 +72,8 @@ Ruta base `/api/v1`. Los valores monetarios son **strings decimales con dos deci
 | `GET`  | `/users/:userId/portfolio`                                         | Valor total de la cuenta, efectivo (`total`, `reserved`, `available`) y posiciones con valor de mercado, costo promedio, P&L y rendimientos.                                                           |
 | `POST` | `/users/:userId/orders`                                            | Envía una orden. Devuelve `201` con estado `FILLED`, `NEW` **o `REJECTED`** (las rechazadas se persisten, como pide el enunciado).                                                                     |
 | `POST` | `/users/:userId/orders/:orderId/cancel`                            | Cancela una orden `NEW` (`409` en otro caso).                                                                                                                                                          |
+| `POST` | `/users/:userId/cash/deposits`                                     | Deposita pesos enteros. Se registra como una orden `FILLED` con side `CASH_IN` sobre el instrumento `ARS` (`price 1`, `size = amount`).                                                                |
+| `POST` | `/users/:userId/cash/withdrawals`                                  | Retira pesos enteros (side `CASH_OUT`). Se valida contra el efectivo _disponible_ bajo el mismo candado por usuario; si no alcanza, se persiste como `REJECTED`.                                       |
 | `GET`  | `/users/:userId/orders?status=&side=&instrumentId=&limit=&cursor=` | Historial de órdenes, más recientes primero, paginado por cursor.                                                                                                                                      |
 | `GET`  | `/users/:userId/orders/:orderId`                                   | Una orden.                                                                                                                                                                                             |
 | `GET`  | `/health/live`, `/health/ready`                                    | Liveness / readiness (ping a la base).                                                                                                                                                                 |
@@ -143,7 +145,8 @@ Todo se deriva del ledger de `orders`; no se guarda ningún saldo.
 - **Posiciones**: se reproducen los trades FILLED BUY/SELL en orden con costo promedio ponderado. `marketValue = quantity × último close`, `totalReturnPct = (marketValue − costBasis) / costBasis`, `dailyReturnPct = (close − previousClose) / previousClose` ([ADR-007](docs/DECISIONS.es.md#adr-007-costo-promedio-ponderado-y-rendimientos)).
 - **Tamaño.** `size` o `amount` (nunca ambos); `size = floor(amount / precio)` con el último close para MARKET y el precio límite para LIMIT. Sin fracciones de acción.
 - **Ciclo de vida.** MARKET → `FILLED` al último close. LIMIT → `NEW`. Solo `NEW` se puede cancelar → `CANCELLED`. Efectivo/acciones insuficientes → `REJECTED` (persistida).
-- **Concurrencia.** El envío y la cancelación de órdenes de un usuario se serializan con un candado de fila dentro de una transacción, así las órdenes concurrentes nunca pueden sobregirar efectivo ni acciones ([ADR-010](docs/DECISIONS.es.md#adr-010-concurrencia-candado-por-usuario-en-lugar-de-serializable)).
+- **Transferencias.** Los depósitos y retiros son órdenes con side `CASH_IN` / `CASH_OUT` sobre `ARS`, como en el dataset, pero solo a través de los endpoints `/cash`: `POST /orders` rechaza esos sides (400) y el instrumento `ARS` (422). Un retiro mayor al efectivo disponible se persiste como `REJECTED` ([ADR-017](docs/DECISIONS.es.md#adr-017-las-transferencias-son-órdenes-con-side-cash_in--cash_out-a-través-de-sus-propios-endpoints)).
+- **Concurrencia.** El envío, la cancelación y los movimientos de efectivo de un usuario se serializan con un candado de fila dentro de una transacción `READ COMMITTED`, así las operaciones concurrentes nunca pueden sobregirar efectivo ni acciones, compitan entre órdenes, retiros o ambos ([ADR-010](docs/DECISIONS.es.md#adr-010-concurrencia-candado-por-usuario-en-lugar-de-serializable)).
 - **Rarezas de datos contempladas.** Las posiciones negativas o sobrevendidas (el seed vende más BMA de lo que compró) se excluyen de las tenencias y se informan en `warnings[]`; los instrumentos sin market data tienen precio `null` y no se pueden comprar a mercado.
 
 ## Arquitectura
@@ -237,28 +240,28 @@ Scripts útiles (también envueltos en el `Makefile`, corré `make help`):
 
 Todas las variables se validan al arrancar (`src/config/env.schema.ts`); un valor inválido detiene el proceso con un mensaje claro. `.env` se carga si existe y nunca pisa variables de entorno reales.
 
-| Variable                  | Default       | Descripción                                                                   |
-| ------------------------- | ------------- | ----------------------------------------------------------------------------- |
-| `NODE_ENV`                | `development` | `development` activa logs legibles; `production` / `test` emiten JSON         |
-| `PORT`                    | `3000`        | Puerto HTTP                                                                   |
-| `LOG_LEVEL`               | `info`        | Nivel de pino (`silent` en tests)                                             |
-| `DATABASE_URL`            | obligatoria   | `postgres://user:pass@host:5432/db`                                           |
-| `DB_POOL_MAX`             | `10`          | Tamaño del pool de Sequelize                                                  |
-| `RUN_SEED`                | `true`        | El entrypoint del contenedor carga el dataset del challenge después de migrar |
-| `CORS_ORIGINS`            | `*`           | Lista separada por comas, o `*`                                               |
-| `RATE_LIMIT_ENABLED`      | `true`        | Throttling por IP (desactivar para pruebas de carga)                          |
-| `RATE_LIMIT_TTL_SECONDS`  | `60`          | Ventana de throttling                                                         |
-| `RATE_LIMIT_LIMIT`        | `100`         | Requests por ventana por IP                                                   |
-| `RATE_LIMIT_ORDERS_LIMIT` | `20`          | Envíos/cancelaciones de órdenes por ventana por IP                            |
-| `METRICS_ENABLED`         | `true`        | Expone `/metrics`                                                             |
+| Variable                  | Default       | Descripción                                                                           |
+| ------------------------- | ------------- | ------------------------------------------------------------------------------------- |
+| `NODE_ENV`                | `development` | `development` activa logs legibles; `production` / `test` emiten JSON                 |
+| `PORT`                    | `3000`        | Puerto HTTP                                                                           |
+| `LOG_LEVEL`               | `info`        | Nivel de pino (`silent` en tests)                                                     |
+| `DATABASE_URL`            | obligatoria   | `postgres://user:pass@host:5432/db`                                                   |
+| `DB_POOL_MAX`             | `10`          | Tamaño del pool de Sequelize                                                          |
+| `RUN_SEED`                | `true`        | El entrypoint del contenedor carga el dataset del challenge después de migrar         |
+| `CORS_ORIGINS`            | `*`           | Lista separada por comas, o `*`                                                       |
+| `RATE_LIMIT_ENABLED`      | `true`        | Throttling por IP (desactivar para pruebas de carga)                                  |
+| `RATE_LIMIT_TTL_SECONDS`  | `60`          | Ventana de throttling                                                                 |
+| `RATE_LIMIT_LIMIT`        | `100`         | Requests por ventana por IP                                                           |
+| `RATE_LIMIT_ORDERS_LIMIT` | `20`          | Mutaciones del ledger (órdenes, cancelaciones, depósitos, retiros) por ventana por IP |
+| `METRICS_ENABLED`         | `true`        | Expone `/metrics`                                                                     |
 
 ## Testing
 
-| Capa                                           | Herramienta                           | Qué demuestra                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ---------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Unitarios (`src/**/*.spec.ts`)                 | Jest                                  | Lógica de dominio pura: `Money`, replay de posiciones y costo promedio, regla de decisión de órdenes, validadores, servicios con repositorios simulados                                                                                                                                                                                                                                                                                                     |
-| Integración (`test/integration/*.e2e-spec.ts`) | Jest + Supertest + **Testcontainers** | El pipeline HTTP real contra un Postgres 16 descartable con las migraciones y el seed reales. Incluye el **test funcional del envío de órdenes** exigido por el enunciado (27 escenarios: fills, reservas, rechazos persistidos como `REJECTED`, cada camino de validación, cancelación, paginación y dos tests de **concurrencia** que prueban que no hay sobregiro), el portafolio comparado literalmente contra el seed, búsqueda y endpoints operativos |
-| Carga / corrección                             | k6                                    | Smoke, carga en rampa con umbrales de latencia, y una ráfaga de 50 VUs comprando a la vez que verifica que la cuenta nunca queda en negativo                                                                                                                                                                                                                                                                                                                |
+| Capa                                           | Herramienta                           | Qué demuestra                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unitarios (`src/**/*.spec.ts`)                 | Jest                                  | Lógica de dominio pura: `Money`, replay de posiciones y costo promedio, regla de decisión de órdenes, validadores, servicios con repositorios simulados                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Integración (`test/integration/*.e2e-spec.ts`) | Jest + Supertest + **Testcontainers** | El pipeline HTTP real contra un Postgres 16 descartable con las migraciones y el seed reales. Incluye el **test funcional del envío de órdenes** exigido por el enunciado (27 escenarios: fills, reservas, rechazos persistidos como `REJECTED`, cada camino de validación, cancelación, paginación y dos tests de **concurrencia** que prueban que no hay sobregiro), **18 escenarios de efectivo** (depósitos, retiros contra el disponible, rechazos persistidos, sides de efectivo rechazados en el endpoint de órdenes, retiros concurrentes y retiros compitiendo con compras), el portafolio comparado literalmente contra el seed, búsqueda y endpoints operativos |
+| Carga / corrección                             | k6                                    | Smoke, carga en rampa con umbrales de latencia, y una ráfaga de 50 VUs comprando a la vez que verifica que la cuenta nunca queda en negativo                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 ```bash
 npm test               # ~10 s
@@ -266,7 +269,7 @@ npm run test:e2e       # ~30 s, necesita Docker (levanta postgres:16-alpine)
 npm run test:cov       # ambos proyectos, cobertura combinada -> coverage/lcov-report/index.html
 ```
 
-Los umbrales de cobertura se aplican (85 % de sentencias / funciones / líneas, 80 % de ramas); la última corrida local reportó ~96 % de sentencias y ~85 % de ramas sobre `src/` excluyendo DTOs, modelos, migraciones y bootstrap.
+Los umbrales de cobertura se aplican (85 % de sentencias / funciones / líneas, 80 % de ramas); la última corrida local reportó ~97 % de sentencias y ~86 % de ramas sobre `src/` excluyendo DTOs, modelos, migraciones y bootstrap.
 
 ## Pruebas de carga y concurrencia (k6)
 
@@ -298,7 +301,7 @@ Métricas expuestas en `/metrics` (**plantillas** de ruta, cardinalidad acotada)
 
 El dashboard (`docker/grafana/provisioning/dashboards/cocos-api.json`) muestra tasa de requests por ruta, percentiles de latencia, clases de respuesta, resultados de órdenes y motivos de rechazo, uso del pool y salud del runtime.
 
-Los logs son JSON (pino) con `req.id`; los scrapes de health y métricas no se loguean. Las anomalías del portafolio (posiciones negativas, precios faltantes) se loguean en `warn` con el id del usuario.
+Los logs son JSON (pino) con `req.id`; los scrapes de health y métricas no se loguean. Toda operación que mueve efectivo o acciones (enviar, cancelar, depositar, retirar) deja un rastro estructurado con `operation`, `userId` y los campos de negocio: `debug` al recibirla y de nuevo al decidirla bajo el candado (saldos leídos, decisión, espera del candado), `info` en fills y transferencias liquidadas, `warn` en todo resultado `REJECTED`, `debug` en los rechazos esperados (404/409/422 con su `code`) y `error` con el stack y el contexto completo cuando la transacción falla. Las anomalías del portafolio (posiciones negativas, precios faltantes) se loguean en `warn`. Con `LOG_LEVEL=debug` se ve el rastro completo.
 
 ## CI
 
@@ -317,7 +320,7 @@ Dependabot mantiene al día npm, GitHub Actions y la imagen base.
 src/
   main.ts, app.module.ts, app.setup.ts     # bootstrap y pipeline HTTP compartido (también lo usan los tests)
   config/                                  # esquema zod del entorno + AppConfig tipado
-  common/                                  # errores, filtro problem+json, Money, cursor de paginación, validadores, throttling
+  common/                                  # errores, filtro problem+json, Money, cursor de paginación, validadores, throttling, logging de operaciones
   database/                                # módulo Sequelize, modelos, migraciones y seeders umzug, CLI, parsers de tipos pg
   health/                                  # liveness / readiness con Terminus
   observability/                           # módulo de logging pino, módulo de métricas Prometheus
@@ -325,8 +328,9 @@ src/
     instruments/                           # búsqueda + detalle, con últimos precios
     marketdata/                            # último close / previous close por instrumento
     portfolio/                             # agregados del ledger, calculadora pura de posiciones, valuación
-    orders/                                # envío / cancelación / listado, regla de decisión, candado por usuario
-    users/                                 # lookup de usuario, UserExistsGuard, candado de fila
+    orders/                                # envío / cancelación / listado, regla de decisión
+    cash/                                  # depósitos (CASH_IN) / retiros (CASH_OUT), regla de decisión
+    users/                                 # lookup de usuario, UserExistsGuard, candado de fila por usuario (withLock)
 test/
   setup/                                   # setup / teardown global de Testcontainers
   helpers/                                 # fábrica de app de test, reset de la base al seed

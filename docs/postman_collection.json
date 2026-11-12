@@ -905,6 +905,240 @@
           }
         }
       ]
+    },
+    {
+      "name": "Cash",
+      "description": "Deposits (CASH_IN) and withdrawals (CASH_OUT): orders on the ARS instrument with price 1 and size = amount, under the same per-user lock as order placement. Whole ARS only.",
+      "item": [
+        {
+          "name": "Deposit (CASH_IN)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/cash/deposits",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "cash",
+                "deposits"
+              ]
+            },
+            "description": "201 FILLED, side CASH_IN, ticker ARS, price 1.00",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 100000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Withdraw (CASH_OUT)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/cash/withdrawals",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "cash",
+                "withdrawals"
+              ]
+            },
+            "description": "201 FILLED when amount <= cash.available",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 50000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Withdraw above available (REJECTED)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/cash/withdrawals",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "cash",
+                "withdrawals"
+              ]
+            },
+            "description": "201 REJECTED INSUFFICIENT_FUNDS; the row is persisted and cash is unchanged",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 99999999\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Fractional amount (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/cash/deposits",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "cash",
+                "deposits"
+              ]
+            },
+            "description": "400 VALIDATION_ERROR: whole ARS only",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 10.5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Unknown user (404)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/999/cash/deposits",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "999",
+                "cash",
+                "deposits"
+              ]
+            },
+            "description": "404 USER_NOT_FOUND",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "CASH_IN via orders endpoint (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders"
+              ]
+            },
+            "description": "400: cash sides are only accepted on the /cash endpoints",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"instrumentId\": 47,\n  \"side\": \"CASH_IN\",\n  \"type\": \"MARKET\",\n  \"size\": 1000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Cash movements in history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{api}}/users/{{userId}}/orders?side=CASH_OUT",
+              "host": [
+                "{{api}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "side",
+                  "value": "CASH_OUT"
+                }
+              ]
+            },
+            "description": "Transfers are regular ledger rows; filter by side"
+          }
+        }
+      ]
     }
   ]
 }

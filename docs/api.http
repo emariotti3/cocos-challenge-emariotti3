@@ -146,6 +146,39 @@ Content-Type: application/json
 
 { "instrumentId": 9999, "side": "BUY", "type": "MARKET", "size": 1 }
 
+### Deposit cash -> 201 FILLED (side CASH_IN on ARS, price 1, size = amount)
+POST {{api}}/users/{{userId}}/cash/deposits
+Content-Type: application/json
+
+{ "amount": 100000 }
+
+### Withdraw cash within the available balance -> 201 FILLED (side CASH_OUT)
+POST {{api}}/users/{{userId}}/cash/withdrawals
+Content-Type: application/json
+
+{ "amount": 50000 }
+
+### Withdraw more than the available cash -> 201 REJECTED INSUFFICIENT_FUNDS (persisted)
+POST {{api}}/users/{{userId}}/cash/withdrawals
+Content-Type: application/json
+
+{ "amount": 99999999 }
+
+### Fractional amount -> 400 (whole ARS only)
+POST {{api}}/users/{{userId}}/cash/deposits
+Content-Type: application/json
+
+{ "amount": 10.5 }
+
+### Cash sides are not accepted on the orders endpoint -> 400
+POST {{api}}/users/{{userId}}/orders
+Content-Type: application/json
+
+{ "instrumentId": {{pamp}}, "side": "CASH_IN", "type": "MARKET", "size": 1000 }
+
+### Cash movements in the history
+GET {{api}}/users/{{userId}}/orders?side=CASH_OUT
+
 ### Cancel a FILLED order -> 409 ORDER_NOT_CANCELLABLE
 POST {{api}}/users/{{userId}}/orders/2/cancel
 

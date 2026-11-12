@@ -8,7 +8,7 @@
 
 Versión en español: [README.es.md](README.es.md).
 
-REST API for a brokerage account: **portfolio valuation**, **instrument search** and **order placement** (MARKET / LIMIT, with cancellation) on top of the provided Postgres schema. Built as a production-style service: validated configuration, migrations, structured logs, RFC 7807 errors, rate limiting, health checks, Prometheus metrics with a Grafana dashboard, unit + integration + load tests, and a CI pipeline.
+REST API for a brokerage account: **portfolio valuation**, **instrument search** and **order placement** (MARKET / LIMIT, with cancellation) and **cash deposits / withdrawals** on top of the provided Postgres schema. Built as a production-style service: validated configuration, migrations, structured logs, RFC 7807 errors, rate limiting, health checks, Prometheus metrics with a Grafana dashboard, unit + integration + load tests, and a CI pipeline.
 
 The original statement is in [`backend-challenge.md`](backend-challenge.md). Every assumption and design choice is documented in [`docs/DECISIONS.md`](docs/DECISIONS.md) (also in Spanish: [`docs/DECISIONS.es.md`](docs/DECISIONS.es.md)).
 
@@ -65,18 +65,20 @@ Stop everything with `docker compose down` (add `-v` to drop the database volume
 
 Base path `/api/v1`. Money values are **decimal strings with two decimals** in ARS. Errors are `application/problem+json` with a stable `code` (see below). There is no authentication (not required by the challenge): the user is a path parameter and unknown users return `404 USER_NOT_FOUND`.
 
-| Method | Path                                                               | Purpose                                                                                                                                        |
-| ------ | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/instruments?q=&ticker=&name=&page=&limit=`                       | Search by ticker and/or name (case-insensitive, partial, trigram-ranked). Returns last price and daily return. No filter = full tradable list. |
-| `GET`  | `/instruments/:id`                                                 | One instrument with its latest price.                                                                                                          |
-| `GET`  | `/users/:userId/portfolio`                                         | Total account value, cash (`total`, `reserved`, `available`) and positions with market value, average cost, P&L and returns.                   |
-| `POST` | `/users/:userId/orders`                                            | Place an order. Returns `201` with status `FILLED`, `NEW` **or `REJECTED`** (rejected orders are persisted, as required).                      |
-| `POST` | `/users/:userId/orders/:orderId/cancel`                            | Cancel a `NEW` order (`409` otherwise).                                                                                                        |
-| `GET`  | `/users/:userId/orders?status=&side=&instrumentId=&limit=&cursor=` | Order history, newest first, cursor-paginated.                                                                                                 |
-| `GET`  | `/users/:userId/orders/:orderId`                                   | One order.                                                                                                                                     |
-| `GET`  | `/health/live`, `/health/ready`                                    | Liveness / readiness (database ping).                                                                                                          |
-| `GET`  | `/metrics`                                                         | Prometheus exposition.                                                                                                                         |
-| `GET`  | `/docs`, `/docs-json`                                              | Swagger UI / OpenAPI JSON.                                                                                                                     |
+| Method | Path                                                               | Purpose                                                                                                                                            |
+| ------ | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/instruments?q=&ticker=&name=&page=&limit=`                       | Search by ticker and/or name (case-insensitive, partial, trigram-ranked). Returns last price and daily return. No filter = full tradable list.     |
+| `GET`  | `/instruments/:id`                                                 | One instrument with its latest price.                                                                                                              |
+| `GET`  | `/users/:userId/portfolio`                                         | Total account value, cash (`total`, `reserved`, `available`) and positions with market value, average cost, P&L and returns.                       |
+| `POST` | `/users/:userId/orders`                                            | Place an order. Returns `201` with status `FILLED`, `NEW` **or `REJECTED`** (rejected orders are persisted, as required).                          |
+| `POST` | `/users/:userId/orders/:orderId/cancel`                            | Cancel a `NEW` order (`409` otherwise).                                                                                                            |
+| `POST` | `/users/:userId/cash/deposits`                                     | Deposit whole ARS. Recorded as a `FILLED` order with side `CASH_IN` on the `ARS` instrument (`price 1`, `size = amount`).                          |
+| `POST` | `/users/:userId/cash/withdrawals`                                  | Withdraw whole ARS (side `CASH_OUT`). Checked against _available_ cash under the same per-user lock; insufficient cash is persisted as `REJECTED`. |
+| `GET`  | `/users/:userId/orders?status=&side=&instrumentId=&limit=&cursor=` | Order history, newest first, cursor-paginated.                                                                                                     |
+| `GET`  | `/users/:userId/orders/:orderId`                                   | One order.                                                                                                                                         |
+| `GET`  | `/health/live`, `/health/ready`                                    | Liveness / readiness (database ping).                                                                                                              |
+| `GET`  | `/metrics`                                                         | Prometheus exposition.                                                                                                                             |
+| `GET`  | `/docs`, `/docs-json`                                              | Swagger UI / OpenAPI JSON.                                                                                                                         |
 
 ### Placing an order
 
@@ -143,7 +145,8 @@ Everything is derived from the `orders` ledger; no balance is stored.
 - **Positions** replay FILLED BUY/SELL trades in order with a weighted-average cost. `marketValue = quantity × latest close`, `totalReturnPct = (marketValue − costBasis) / costBasis`, `dailyReturnPct = (close − previousClose) / previousClose` ([ADR-007](docs/DECISIONS.md#adr-007-weighted-average-cost-and-returns)).
 - **Sizing.** `size` or `amount` (never both); `size = floor(amount / price)` with the last close for MARKET and the limit price for LIMIT. No fractional shares.
 - **Lifecycle.** MARKET → `FILLED` at the last close. LIMIT → `NEW`. Only `NEW` can be cancelled → `CANCELLED`. Insufficient cash/shares → `REJECTED` (persisted).
-- **Concurrency.** Order placement and cancellation for one user are serialized with a row lock inside a transaction, so concurrent orders can never overdraw cash or shares ([ADR-010](docs/DECISIONS.md#adr-010-concurrency-per-user-row-lock-instead-of-serializable)).
+- **Cash transfers.** Deposits and withdrawals are orders with side `CASH_IN` / `CASH_OUT` on `ARS`, as in the dataset, but only through the `/cash` endpoints: `POST /orders` refuses those sides (400) and the `ARS` instrument (422). A withdrawal above the available cash is persisted as `REJECTED` ([ADR-017](docs/DECISIONS.md#adr-017-cash-transfers-are-orders-with-side-cash_in--cash_out-through-their-own-endpoints)).
+- **Concurrency.** Order placement, cancellation and cash movements for one user are serialized with a row lock inside a `READ COMMITTED` transaction, so concurrent operations can never overdraw cash or shares, whether they compete through orders, withdrawals or both ([ADR-010](docs/DECISIONS.md#adr-010-concurrency-per-user-row-lock-instead-of-serializable)).
 - **Data quirks handled.** Negative/oversold positions (the seed sells more BMA than it bought) are excluded from holdings and reported in `warnings[]`; instruments without market data get `null` prices and cannot be bought at market.
 
 ## Architecture
@@ -237,28 +240,28 @@ No local `psql`? `make psql` opens one inside the Postgres container.
 
 All variables are validated at boot (`src/config/env.schema.ts`); invalid values stop the process with a clear message. `.env` is loaded if present and never overrides real environment variables.
 
-| Variable                  | Default       | Description                                                        |
-| ------------------------- | ------------- | ------------------------------------------------------------------ |
-| `NODE_ENV`                | `development` | `development` enables pretty logs; `production` / `test` emit JSON |
-| `PORT`                    | `3000`        | HTTP port                                                          |
-| `LOG_LEVEL`               | `info`        | pino level (`silent` in tests)                                     |
-| `DATABASE_URL`            | required      | `postgres://user:pass@host:5432/db`                                |
-| `DB_POOL_MAX`             | `10`          | Sequelize pool size                                                |
-| `RUN_SEED`                | `true`        | Container entrypoint loads the challenge dataset after migrating   |
-| `CORS_ORIGINS`            | `*`           | Comma-separated allow-list, or `*`                                 |
-| `RATE_LIMIT_ENABLED`      | `true`        | Per-IP throttling (disable for load tests)                         |
-| `RATE_LIMIT_TTL_SECONDS`  | `60`          | Throttling window                                                  |
-| `RATE_LIMIT_LIMIT`        | `100`         | Requests per window per IP                                         |
-| `RATE_LIMIT_ORDERS_LIMIT` | `20`          | Order placements/cancellations per window per IP                   |
-| `METRICS_ENABLED`         | `true`        | Expose `/metrics`                                                  |
+| Variable                  | Default       | Description                                                                       |
+| ------------------------- | ------------- | --------------------------------------------------------------------------------- |
+| `NODE_ENV`                | `development` | `development` enables pretty logs; `production` / `test` emit JSON                |
+| `PORT`                    | `3000`        | HTTP port                                                                         |
+| `LOG_LEVEL`               | `info`        | pino level (`silent` in tests)                                                    |
+| `DATABASE_URL`            | required      | `postgres://user:pass@host:5432/db`                                               |
+| `DB_POOL_MAX`             | `10`          | Sequelize pool size                                                               |
+| `RUN_SEED`                | `true`        | Container entrypoint loads the challenge dataset after migrating                  |
+| `CORS_ORIGINS`            | `*`           | Comma-separated allow-list, or `*`                                                |
+| `RATE_LIMIT_ENABLED`      | `true`        | Per-IP throttling (disable for load tests)                                        |
+| `RATE_LIMIT_TTL_SECONDS`  | `60`          | Throttling window                                                                 |
+| `RATE_LIMIT_LIMIT`        | `100`         | Requests per window per IP                                                        |
+| `RATE_LIMIT_ORDERS_LIMIT` | `20`          | Ledger mutations (orders, cancellations, deposits, withdrawals) per window per IP |
+| `METRICS_ENABLED`         | `true`        | Expose `/metrics`                                                                 |
 
 ## Testing
 
-| Layer                                          | Tool                                  | What it proves                                                                                                                                                                                                                                                                                                                                                                                                              |
-| ---------------------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Unit (`src/**/*.spec.ts`)                      | Jest                                  | Pure domain logic: `Money`, position replay and average cost, order decision rule, validators, services with mocked repositories                                                                                                                                                                                                                                                                                            |
-| Integration (`test/integration/*.e2e-spec.ts`) | Jest + Supertest + **Testcontainers** | The real HTTP pipeline against a disposable Postgres 16 with the real migrations and seed. Includes the challenge's **functional test of order placement** (27 scenarios: fills, reservations, rejections persisted as `REJECTED`, every validation path, cancellation, pagination, and two **concurrency** tests proving no overdraft), the portfolio asserted verbatim against the seed, search and operational endpoints |
-| Load / correctness                             | k6                                    | Smoke, ramping load with latency thresholds, and a 50-VU simultaneous-buy burst asserting the account never goes negative                                                                                                                                                                                                                                                                                                   |
+| Layer                                          | Tool                                  | What it proves                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit (`src/**/*.spec.ts`)                      | Jest                                  | Pure domain logic: `Money`, position replay and average cost, order decision rule, validators, services with mocked repositories                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Integration (`test/integration/*.e2e-spec.ts`) | Jest + Supertest + **Testcontainers** | The real HTTP pipeline against a disposable Postgres 16 with the real migrations and seed. Includes the challenge's **functional test of order placement** (27 scenarios: fills, reservations, rejections persisted as `REJECTED`, every validation path, cancellation, pagination, and two **concurrency** tests proving no overdraft), **18 cash scenarios** (deposits, withdrawals against available cash, rejections persisted, cash sides refused on the orders endpoint, concurrent withdrawals and withdrawals racing buys), the portfolio asserted verbatim against the seed, search and operational endpoints |
+| Load / correctness                             | k6                                    | Smoke, ramping load with latency thresholds, and a 50-VU simultaneous-buy burst asserting the account never goes negative                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 ```bash
 npm test               # ~10 s
@@ -266,7 +269,7 @@ npm run test:e2e       # ~30 s, needs Docker (starts postgres:16-alpine)
 npm run test:cov       # both projects, merged coverage -> coverage/lcov-report/index.html
 ```
 
-Coverage thresholds are enforced (85% statements / functions / lines, 80% branches); the last local run reported ~96% statements and ~85% branches over `src/` excluding DTOs, models, migrations and bootstrap.
+Coverage thresholds are enforced (85% statements / functions / lines, 80% branches); the last local run reported ~97% statements and ~86% branches over `src/` excluding DTOs, models, migrations and bootstrap.
 
 ## Load and concurrency tests (k6)
 
@@ -298,7 +301,7 @@ Metrics exposed at `/metrics` (route **templates**, bounded cardinality):
 
 The dashboard (`docker/grafana/provisioning/dashboards/cocos-api.json`) shows request rate by route, latency percentiles, response classes, order outcomes and rejection reasons, pool usage and runtime health.
 
-Logs are JSON (pino) with `req.id`; health and metrics scrapes are not logged. Portfolio anomalies (negative positions, missing prices) are logged at `warn` with the user id.
+Logs are JSON (pino) with `req.id`; health and metrics scrapes are not logged. Every operation that moves cash or shares (place, cancel, deposit, withdraw) leaves a structured trail with `operation`, `userId` and the business fields: `debug` on receipt and again once the decision is taken under the lock (balances read, decision, lock wait), `info` on fills and settled transfers, `warn` on every `REJECTED` outcome, `debug` for expected refusals (404/409/422 with their `code`) and `error` with the stack and full context when the transaction fails. Portfolio anomalies (negative positions, missing prices) are logged at `warn`. Run with `LOG_LEVEL=debug` to see the whole trail.
 
 ## CI
 
@@ -317,7 +320,7 @@ Dependabot keeps npm, GitHub Actions and the base image current.
 src/
   main.ts, app.module.ts, app.setup.ts     # bootstrap and the shared HTTP pipeline (also used by tests)
   config/                                  # zod env schema + typed AppConfig
-  common/                                  # errors, problem+json filter, Money, pagination cursor, validators, throttling
+  common/                                  # errors, problem+json filter, Money, pagination cursor, validators, throttling, operation logging
   database/                                # Sequelize module, models, umzug migrations + seeders, CLI, pg type parsers
   health/                                  # Terminus liveness / readiness
   observability/                           # pino logging module, Prometheus metrics module
@@ -325,8 +328,9 @@ src/
     instruments/                           # search + get, with latest prices
     marketdata/                            # latest close / previous close per instrument
     portfolio/                             # ledger aggregates, pure position calculator, valuation
-    orders/                                # place / cancel / list, decision rule, per-user lock
-    users/                                 # user lookup, UserExistsGuard, row lock
+    orders/                                # place / cancel / list, decision rule
+    cash/                                  # deposits (CASH_IN) / withdrawals (CASH_OUT), decision rule
+    users/                                 # user lookup, UserExistsGuard, per-user row lock (withLock)
 test/
   setup/                                   # Testcontainers global setup / teardown
   helpers/                                 # test app factory, DB reset to seed
